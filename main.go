@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,15 +98,19 @@ func fileContainsQuery(query, path string) (bool, error) {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
+	// Use bufio.Reader instead of bufio.Scanner
+	reader := bufio.NewReader(file)
+	for {
+		line, err := reader.ReadString('\n') // Read line by line
 		if strings.Contains(line, query) {
 			return true, nil
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return false, err
+		if err != nil {
+			if err == io.EOF {
+				break // End of file reached
+			}
+			return false, err // Other errors
+		}
 	}
 	return false, nil
 }
