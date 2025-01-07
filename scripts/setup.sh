@@ -17,7 +17,7 @@ show_setup_menu() {
     echo "╠════════════════════════════════════╣"
     echo "║ 1. Deploy/Update Chaincode         ║"
     echo "║ 2. Setup Network + Deploy          ║"
-    echo "║ 3. Exit                           ║"
+    echo "║ 3. Exit                            ║"
     echo "╚════════════════════════════════════╝"
     echo "Enter your choice (1-3): "
 }
@@ -92,10 +92,32 @@ setup_network() {
     check_status "Network setup" || return 1
 }
 
+get_current_version() {
+    local cc_name=$1
+    local version="1.0.0"  # default version
+    
+    # Try to get current committed version
+    local committed_info=$(peer lifecycle chaincode querycommitted -C mychannel -n $cc_name 2>&1)
+    if ! echo "$committed_info" | grep -q "not found"; then
+        version=$(echo "$committed_info" | grep -o "Version: [0-9.]*" | cut -d' ' -f2)
+    fi
+    echo $version
+}
+
+# Function to increment version
+increment_version() {
+    local version=$1
+    local major minor patch
+    
+    IFS='.' read -r major minor patch <<< "$version"
+    patch=$((patch + 1))
+    echo "$major.$minor.$patch"
+}
+
 # Function to deploy chaincode
 deploy_chaincode() {
     log "info" "Starting chaincode deployment process..."
-    
+
     # Set environment variables
     export PATH=$FABRIC_SAMPLES_DIR/bin:$PATH
     export FABRIC_CFG_PATH=$FABRIC_SAMPLES_DIR/config
@@ -104,6 +126,7 @@ deploy_chaincode() {
     # Define chaincode parameters
     CHAINCODE_NAME="file-management-chaincode"
     CHAINCODE_VERSION="1.0"
+    CHAINCODE_LABEL="${CHAINCODE_NAME}_${CHAINCODE_VERSION}"
     CHAINCODE_PATH="$SCRIPT_DIR/../file-management-chaincode/filemanagement.tar.gz"
 
     # Verify chaincode package exists
@@ -112,59 +135,77 @@ deploy_chaincode() {
         return 1
     fi
 
+    # Get current sequence number
+    COMMITTED_INFO=$(peer lifecycle chaincode querycommitted -C mychannel -n $CHAINCODE_NAME 2>&1)
+    echo "Debug - Committed info: $COMMITTED_INFO"  # Add this line
+
+    if echo "$COMMITTED_INFO" | grep -q "Chaincode definition for name.*not found"; then
+        # Chaincode not committed yet, start with sequence 1
+        SEQUENCE=1
+        echo "Debug - Setting initial sequence to 1"  # Add this line
+    else
+        # Get current sequence and increment
+        CURRENT_SEQUENCE=$(echo "$COMMITTED_INFO" | grep -o "Sequence: [0-9]*" | cut -d' ' -f2)
+        SEQUENCE=$((CURRENT_SEQUENCE + 1))
+        echo "Debug - Incrementing sequence from $CURRENT_SEQUENCE to $SEQUENCE"  # Add this line
+    fi
+
     # Function to set organization context
+    # Before setting org context
     set_org_context() {
         local org=$1
         local port=$2
+        echo "Debug - Setting context for $org"
         export CORE_PEER_LOCALMSPID="${org}MSP"
         export CORE_PEER_TLS_ROOTCERT_FILE=$FABRIC_SAMPLES_DIR/test-network/organizations/peerOrganizations/${org,,}.example.com/peers/peer0.${org,,}.example.com/tls/ca.crt
         export CORE_PEER_MSPCONFIGPATH=$FABRIC_SAMPLES_DIR/test-network/organizations/peerOrganizations/${org,,}.example.com/users/Admin@${org,,}.example.com/msp
         export CORE_PEER_ADDRESS=localhost:$port
+        
+        # Verify environment
+        echo "Debug - Checking environment for $org:"
+        echo "CORE_PEER_LOCALMSPID: $CORE_PEER_LOCALMSPID"
+        echo "CORE_PEER_ADDRESS: $CORE_PEER_ADDRESS"
     }
 
     # Install and approve chaincode for both organizations
     for org in 1 2; do
         # Set org context
         set_org_context "Org$org" $((7051 + (org-1)*2000))
-        
+
         # Check if chaincode is already installed
         show_progress "Checking if chaincode is already installed for Org$org..."
-        INSTALLED_CHAINCODE=$(peer lifecycle chaincode queryinstalled 2>&1 | grep "${CHAINCODE_NAME}_${CHAINCODE_VERSION}" || true)
-        
-        if [ -z "$INSTALLED_CHAINCODE" ]; then
+        INSTALLED_CHAINCODE=$(peer lifecycle chaincode queryinstalled --output json 2>&1)
+        PACKAGE_ID=""  # Initialize as empty
+
+        # Only try jq if we have installed chaincodes
+        if [ "$(echo "$INSTALLED_CHAINCODE" | jq '.installed_chaincodes | length')" -gt 0 ]; then
+            PACKAGE_ID=$(echo "$INSTALLED_CHAINCODE" | jq -r --arg LABEL "$CHAINCODE_LABEL" '.installed_chaincodes[] | select(.label==$LABEL) | .package_id')
+        fi
+
+        if [ -z "$PACKAGE_ID" ]; then
             show_progress "Installing chaincode for Org$org..."
+            # Install without --output json flag
             INSTALL_OUTPUT=$(peer lifecycle chaincode install "$CHAINCODE_PATH" 2>&1)
             if ! check_status "Chaincode installation for Org$org"; then
                 echo "$INSTALL_OUTPUT"
                 continue
             fi
 
-            # Extract package ID - show full output for debugging
-            echo "Full install output: $INSTALL_OUTPUT"
-            
-            # Try both patterns
-            PACKAGE_ID=$(echo "$INSTALL_OUTPUT" | grep -o 'filemanagement_1:[a-f0-9]*')
-            if [ -z "$PACKAGE_ID" ]; then
-                PACKAGE_ID=$(echo "$INSTALL_OUTPUT" | grep -o "${CHAINCODE_NAME}_${CHAINCODE_VERSION}:[a-f0-9]*")
-            fi
+            # Query again to get the package ID after installation
+            INSTALLED_CHAINCODE=$(peer lifecycle chaincode queryinstalled --output json 2>&1)
+            PACKAGE_ID=$(echo "$INSTALLED_CHAINCODE" | jq -r '.installed_chaincodes[0].package_id')
             
             if [ -z "$PACKAGE_ID" ]; then
-                echo "Error: Unable to extract PACKAGE_ID from install output."
-                echo "Install Output: $INSTALL_OUTPUT"
+                log "error" "Unable to extract PACKAGE_ID after installation."
+                echo "Installed chaincodes: $INSTALLED_CHAINCODE"
                 return 1
             fi
-            export PACKAGE_ID
             show_progress "📦 Package ID: $PACKAGE_ID"
         else
             log "success" "Chaincode already installed for Org$org"
-            PACKAGE_ID=$(peer lifecycle chaincode queryinstalled | grep -o 'filemanagement_1:[a-f0-9]*')
-            if [ -z "$PACKAGE_ID" ]; then
-                echo "Error: Unable to extract PACKAGE_ID from query output."
-                return 1
-            fi
-            export PACKAGE_ID
             show_progress "📦 Using existing Package ID: $PACKAGE_ID"
         fi
+            
 
         # Approve chaincode
         show_progress "Approving chaincode for Org$org..."
@@ -175,39 +216,38 @@ deploy_chaincode() {
             --name $CHAINCODE_NAME \
             --version $CHAINCODE_VERSION \
             --package-id $PACKAGE_ID \
-            --sequence 1 \
+            --sequence $SEQUENCE \
             --tls \
             --cafile $FABRIC_SAMPLES_DIR/test-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem \
             --signature-policy "AND('Org1MSP.member','Org2MSP.member')"
-        
+
         check_status "Chaincode approval for Org$org" || return 1
     done
 
     # Commit chaincode definition
-    show_progress "Checking if chaincode is already committed..."
-    COMMITTED_CHECK=$(peer lifecycle chaincode querycommitted --channelID mychannel --name $CHAINCODE_NAME 2>&1 || true)
-    
-    if [[ $COMMITTED_CHECK == *"404"* ]]; then
-        show_progress "Committing chaincode to channel..."
-        peer lifecycle chaincode commit \
-            -o localhost:7050 \
-            --ordererTLSHostnameOverride orderer.example.com \
-            --channelID mychannel \
-            --name $CHAINCODE_NAME \
-            --version $CHAINCODE_VERSION \
-            --sequence 1 \
-            --tls \
-            --cafile $FABRIC_SAMPLES_DIR/test-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem \
-            --peerAddresses localhost:7051 \
-            --tlsRootCertFiles $FABRIC_SAMPLES_DIR/test-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt \
-            --peerAddresses localhost:9051 \
-            --tlsRootCertFiles $FABRIC_SAMPLES_DIR/test-network/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt \
-            --signature-policy "AND('Org1MSP.member','Org2MSP.member')"
-        
-        check_status "Chaincode commitment" || return 1
-    else
-        log "success" "Chaincode already committed"
-    fi
+    show_progress "Checking approved chaincode definitions..."
+    for org in 1 2; do
+        set_org_context "Org$org" $((7051 + (org-1)*2000))
+        echo "Debug - Approved chaincode definition for Org$org:"
+        peer lifecycle chaincode queryapproved -C mychannel -n $CHAINCODE_NAME
+    done
+    show_progress "Committing chaincode to channel with sequence $SEQUENCE..."
+    peer lifecycle chaincode commit \
+        -o localhost:7050 \
+        --ordererTLSHostnameOverride orderer.example.com \
+        --channelID mychannel \
+        --name $CHAINCODE_NAME \
+        --version $CHAINCODE_VERSION \
+        --sequence $SEQUENCE \
+        --tls \
+        --cafile $FABRIC_SAMPLES_DIR/test-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem \
+        --peerAddresses localhost:7051 \
+        --tlsRootCertFiles $FABRIC_SAMPLES_DIR/test-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt \
+        --peerAddresses localhost:9051 \
+        --tlsRootCertFiles $FABRIC_SAMPLES_DIR/test-network/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt \
+        --signature-policy "AND('Org1MSP.member','Org2MSP.member')"
+
+    check_status "Chaincode commitment" || return 1
 
     # Verify deployment
     show_progress "Verifying chaincode deployment..."
@@ -216,6 +256,35 @@ deploy_chaincode() {
 
     log "success" "Chaincode deployment completed successfully!"
     return 0
+}
+package_chaincode() {
+    log "info" "Packaging chaincode..."
+    
+    # Navigate to chaincode directory
+    cd "$SCRIPT_DIR/../file-management-chaincode" || return 1
+    
+    # Clean any old package
+    rm -f filemanagement.tar.gz
+    
+    # Create tar.gz of the chaincode directory
+    tar czf filemanagement.tar.gz \
+        --exclude="*.tar.gz" \
+        --exclude="*/\.*" \
+        file-management-chaincode/ \
+        go.mod \
+        go.sum \
+        handlers/ \
+        main.go \
+        models/ \
+        utils/
+        
+    if [ $? -eq 0 ]; then
+        log "success" "Created new chaincode package"
+        return 0
+    else
+        log "error" "Failed to create chaincode package"
+        return 1
+    fi
 }
 
 # Main menu logic
@@ -229,9 +298,15 @@ while true; do
     
     case $choice in
         1)
+            read -p "Do you want to repackage the chaincode first? (y/n) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                package_chaincode || exit 1
+            fi
             deploy_chaincode
             break
             ;;
+
         2)
             setup_network && deploy_chaincode
             break
