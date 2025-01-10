@@ -124,10 +124,10 @@ deploy_chaincode() {
     export CORE_PEER_TLS_ENABLED=true
 
     # Define chaincode parameters
-    CHAINCODE_NAME="file-management-chaincode"
+    CHAINCODE_NAME="chaincode"
     CHAINCODE_VERSION="1.0"
     CHAINCODE_LABEL="${CHAINCODE_NAME}_${CHAINCODE_VERSION}"
-    CHAINCODE_PATH="$SCRIPT_DIR/../file-management-chaincode/filemanagement.tar.gz"
+    CHAINCODE_PATH="$SCRIPT_DIR/../chaincode/chaincode.tar.gz"
 
     # Verify chaincode package exists
     if [ ! -f "$CHAINCODE_PATH" ]; then
@@ -261,22 +261,16 @@ package_chaincode() {
     log "info" "Packaging chaincode..."
     
     # Navigate to chaincode directory
-    cd "$SCRIPT_DIR/../file-management-chaincode" || return 1
+    cd "$SCRIPT_DIR/../chaincode" || return 1
     
-    # Clean any old package
-    rm -f filemanagement.tar.gz
+    # Ensure dependencies are vendored
+    go mod vendor
     
-    # Create tar.gz of the chaincode directory
-    tar czf filemanagement.tar.gz \
-        --exclude="*.tar.gz" \
-        --exclude="*/\.*" \
-        file-management-chaincode/ \
-        go.mod \
-        go.sum \
-        handlers/ \
-        main.go \
-        models/ \
-        utils/
+    # Package using peer lifecycle command
+    peer lifecycle chaincode package chaincode.tar.gz \
+        --path . \
+        --lang golang \
+        --label chaincode_1.0
         
     if [ $? -eq 0 ]; then
         log "success" "Created new chaincode package"

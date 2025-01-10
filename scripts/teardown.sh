@@ -21,7 +21,7 @@ quick_cleanup() {
     echo "🧹 Performing quick cleanup (chaincode only)..."
     
     # Remove specific chaincode containers and images
-    CHAINCODE_NAME="file-management-chaincode"
+    CHAINCODE_NAME="chaincode"
     echo "Removing chaincode containers..."
     docker rm -f $(docker ps -a | grep $CHAINCODE_NAME | awk '{print $1}') 2>/dev/null || true
     
