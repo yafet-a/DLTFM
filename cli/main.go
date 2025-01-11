@@ -30,6 +30,15 @@ func main() {
 		if err := commands.QueryAllFiles(); err != nil {
 			fmt.Printf("Error querying files: %v\n", err)
 		}
+	case "query":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: dltfm query <fileID>")
+			return
+		}
+		fileID := os.Args[2]
+		if err := commands.QueryFileByID(fileID); err != nil {
+			fmt.Printf("Error querying file: %v\n", err)
+		}
 	default:
 		fmt.Println("Unknown command")
 	}
