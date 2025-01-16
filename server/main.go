@@ -54,14 +54,14 @@ func main() {
 	// Debug output to verify network and contract references
 	fmt.Println("DEBUG: Successfully retrieved network and contract references")
 
-	// Test invocation
-	fmt.Println("\n=== Testing QueryAllFiles invocation ===")
-	result, err := contract.EvaluateTransaction("QueryAllFiles")
-	if err != nil {
-		log.Fatalf("Chaincode invocation failed: %v", err)
-	}
-	fmt.Printf("Chaincode output: %s\n", string(result))
-	fmt.Println("=== Test complete ===")
+	// // Test invocation
+	// fmt.Println("\n=== Testing QueryAllFiles invocation ===")
+	// result, err := contract.EvaluateTransaction("QueryAllFiles")
+	// if err != nil {
+	// 	log.Fatalf("Chaincode invocation failed: %v", err)
+	// }
+	// fmt.Printf("Chaincode output: %s\n", string(result))
+	// fmt.Println("=== Test complete ===")
 
 	r := gin.Default()
 	r.Use(cors.Default())
@@ -70,13 +70,8 @@ func main() {
 	{
 		// Query all files - matches QueryAllFiles handler
 		api.GET("/files", func(c *gin.Context) {
-			fmt.Println("Received request to get all files")
-
-			network := gw.GetNetwork("mychannel")
-			fmt.Println("Got network reference")
-
-			contract := network.GetContract("chaincode")
-			fmt.Println("Got contract reference")
+			// fmt.Printf("\nNew request at: %s\n", time.Now().Format(time.RFC3339))
+			// fmt.Printf("Request Headers: %+v\n", c.Request.Header)
 
 			fmt.Println("Evaluating QueryAllFiles transaction...")
 			result, err := contract.EvaluateTransaction("QueryAllFiles")

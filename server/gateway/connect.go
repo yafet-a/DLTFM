@@ -20,7 +20,6 @@ func getFabricSamplesDir() string {
 }
 
 func Connect() (*client.Gateway, error) {
-	// Debug prints for connection process
 	fmt.Println("Starting Gateway connection...")
 
 	clientConnection := newGrpcConnection()
@@ -38,15 +37,11 @@ func Connect() (*client.Gateway, error) {
 	}
 	fmt.Println("Signer created")
 
-	// Create a Gateway connection with increased timeouts
+	// Create a Gateway connection with default timeouts
 	gw, err := client.Connect(
 		id,
 		client.WithSign(sign),
 		client.WithClientConnection(clientConnection),
-		client.WithEvaluateTimeout(1000000000),     // Increase from 5 to 1000000000 seconds
-		client.WithEndorseTimeout(1000000000),      // Increase from 15 to 1000000000 seconds
-		client.WithSubmitTimeout(1000000000),       // Increase from 5 to 1000000000 seconds
-		client.WithCommitStatusTimeout(1000000000), // Increase from 1 to 1000000000 seconds
 	)
 	if err != nil {
 		return nil, err
@@ -80,16 +75,13 @@ func newGrpcConnection() *grpc.ClientConn {
 
 	certPool := x509.NewCertPool()
 	certPool.AddCert(certificate)
-
-	// Try with and without hostname override
 	transportCredentials := credentials.NewClientTLSFromCert(certPool, "")
 
-	fmt.Println("Attempting to establish gRPC connection...")
 	connection, err := grpc.Dial(
 		"localhost:7051",
 		grpc.WithTransportCredentials(transportCredentials),
-		grpc.WithBlock(), // Make the dial blocking
-		grpc.WithDefaultCallOptions( // Increase timeouts
+		grpc.WithBlock(),
+		grpc.WithDefaultCallOptions(
 			grpc.WaitForReady(true),
 			grpc.MaxCallRecvMsgSize(20*1024*1024), // 20MB
 			grpc.MaxCallSendMsgSize(20*1024*1024), // 20MB
