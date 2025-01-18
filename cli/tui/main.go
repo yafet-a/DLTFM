@@ -18,6 +18,24 @@ var (
 	secondaryColor = lipgloss.Color("#888888")
 	bgColor        = lipgloss.Color("#2a2a2a")
 
+	logo = `
+    ██████╗ ██╗  ████████╗███████╗███╗   ███╗
+    ██╔══██╗██║  ╚══██╔══╝██╔════╝████╗ ████║
+    ██║  ██║██║     ██║   █████╗  ██╔████╔██║
+    ██║  ██║██║     ██║   ██╔══╝  ██║╚██╔╝██║
+    ██████╔╝███████╗██║   ██║     ██║ ╚═╝ ██║
+    ╚═════╝ ╚══════╝╚═╝   ╚═╝     ╚═╝     ╚═╝
+    `
+
+	menuIcons = map[string]string{
+		"Register New File": "📝",
+		"View Files":        "📂",
+		"Search Files":      "🔍",
+		"User Settings":     "⚙️",
+		"Help":              "❓",
+		"Logout":            "🚪",
+	}
+
 	baseStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#333333")).
@@ -25,7 +43,13 @@ var (
 
 	containerStyle = baseStyle.Copy().
 			Background(bgColor).
-			Width(60)
+			Width(60).
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#4a9eff"))
+
+	logoStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#4a9eff")).
+			Bold(true)
 
 	titleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#ffffff")).
@@ -213,64 +237,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) loginView() string {
-	container := containerStyle.Copy().Width(40).Render(
-		lipgloss.JoinVertical(
-			lipgloss.Left,
-			titleStyle.Render("DLTFM Login"),
-			"\n",
-			baseStyle.Copy().
-				Background(lipgloss.Color("#333333")).
-				Width(30).
-				Render(m.usernameInput.View()),
-			"\n",
-			lipgloss.NewStyle().
-				Foreground(secondaryColor).
-				Render("[Enter] Login [Ctrl+c] Quit"),
-			"\n",
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#ff0000")).
-				Render(m.errMsg),
-		),
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		logoStyle.Render(logo),
+		"\n",
+		titleStyle.Render("Login"),
+		"\n",
+		baseStyle.Copy().
+			Background(lipgloss.Color("#333333")).
+			Width(30).
+			Render(m.usernameInput.View()),
+		"\n",
+		lipgloss.NewStyle().
+			Foreground(secondaryColor).
+			Render("[Enter] Login [Ctrl+c] Quit"),
+		"\n",
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#ff0000")).
+			Render(m.errMsg),
 	)
-	return lipgloss.Place(
-		m.width,
-		m.height,
-		lipgloss.Center,
-		lipgloss.Center,
-		container,
-	)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		containerStyle.Render(content))
 }
 
+// Update menuView
 func (m Model) menuView() string {
 	var menuItems []string
 	for i, item := range m.menuItems {
+		icon := menuIcons[item]
 		if i == m.selected {
-			menuItems = append(menuItems, selectedItemStyle.Render(item))
+			menuItems = append(menuItems, selectedItemStyle.Render(fmt.Sprintf("%s %s", icon, item)))
 		} else {
-			menuItems = append(menuItems, unselectedItemStyle.Render(item))
+			menuItems = append(menuItems, unselectedItemStyle.Render(fmt.Sprintf("%s %s", icon, item)))
 		}
 	}
 
 	menu := lipgloss.JoinVertical(
 		lipgloss.Left,
+		logoStyle.Render(logo),
+		"\n",
 		titleStyle.Render("Main Menu"),
 		"\n",
 		lipgloss.JoinVertical(lipgloss.Left, menuItems...),
 		"\n\n",
-		statusBarStyle.Render("Connected to: test-network"),
-		statusBarStyle.Render(fmt.Sprintf("User: %s", m.currentUser)),
+		statusBarStyle.Render("🌐 Connected to: test-network"),
+		statusBarStyle.Render(fmt.Sprintf("👤 User: %s", m.currentUser)),
 	)
 
-	container := containerStyle.Render(menu)
-	return lipgloss.Place(
-		m.width,
-		m.height,
-		lipgloss.Center,
-		lipgloss.Center,
-		container,
-	)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		containerStyle.Render(menu))
 }
-
 func (m Model) fileListView() string {
 	if m.fileError != nil {
 		return containerStyle.Render(

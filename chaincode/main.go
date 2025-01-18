@@ -23,6 +23,10 @@ func (s *SmartContract) GetFileByID(ctx contractapi.TransactionContextInterface,
 	return handlers.GetFileByID(ctx, id)
 }
 
+func (s *SmartContract) GetFileByHash(ctx contractapi.TransactionContextInterface, hash string) (string, error) {
+	return handlers.GetFileByHash(ctx, hash)
+}
+
 func main() {
 	chaincode, err := contractapi.NewChaincode(new(SmartContract))
 	if err != nil {

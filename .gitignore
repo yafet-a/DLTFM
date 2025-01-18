@@ -2,3 +2,5 @@
 main
 *.tar.gz
 vendor/
+node_modules/
+.next/
