@@ -11,7 +11,6 @@ import (
 func QueryAllFiles(ctx contractapi.TransactionContextInterface) (string, error) {
 	fmt.Println("DEBUG: Starting QueryAllFiles")
 
-	// Add debug logging for the stub
 	stub := ctx.GetStub()
 	fmt.Printf("DEBUG: Stub initialized: %v\n", stub != nil)
 
@@ -66,4 +65,34 @@ func GetFileByID(ctx contractapi.TransactionContextInterface, id string) (string
 		return "", fmt.Errorf("file with ID %s not found", id)
 	}
 	return string(fileJSON), nil
+}
+
+func GetFileByHash(ctx contractapi.TransactionContextInterface, hash string) (string, error) {
+	fmt.Printf("DEBUG: Searching for file with hash: %s\n", hash)
+
+	// Using an empty string to get all states
+	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
+	if err != nil {
+		return "", fmt.Errorf("failed to get state range: %v", err)
+	}
+	defer resultsIterator.Close()
+
+	for resultsIterator.HasNext() {
+		response, err := resultsIterator.Next()
+		if err != nil {
+			return "", fmt.Errorf("failed to iterate state: %v", err)
+		}
+
+		var file models.File
+		err = json.Unmarshal(response.Value, &file)
+		if err != nil {
+			continue
+		}
+
+		if file.Hash == hash {
+			return string(response.Value), nil
+		}
+	}
+
+	return "", nil
 }

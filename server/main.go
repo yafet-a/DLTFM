@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"dltfm/server/gateway"
 	"encoding/json"
 	"fmt"
@@ -106,10 +107,10 @@ func main() {
 				return
 			}
 
-			// Using same ID generation logic as in RegisterFile handler
-			id := fmt.Sprintf("file_%d", time.Now().UnixNano())
+			// Generate id that includes hash to ensure same file gets same base ID
+			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(request.Content)))
+			id := fmt.Sprintf("file_%s_%d", hash[:8], time.Now().UnixNano())
 
-			// Debug output matching handler
 			fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s\n", id, request.Name)
 
 			_, err := contract.SubmitTransaction("RegisterFile",
@@ -126,15 +127,6 @@ func main() {
 				return
 			}
 
-			// Verify the transaction like in handler
-			file, err := contract.EvaluateTransaction("GetFileByID", id)
-			if err != nil {
-				log.Printf("ERROR: Failed to verify file registration: %v\n", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify file registration"})
-				return
-			}
-
-			fmt.Printf("DEBUG: Verified saved data: %s\n", string(file))
 			c.JSON(http.StatusOK, gin.H{"message": "File successfully registered", "id": id})
 		})
 
