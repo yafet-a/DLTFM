@@ -11,23 +11,53 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
-// RegisterFile adds a new file to the ledger
 func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name string, content string, owner string, metadata string) error {
 	fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s\n", id, name)
 
 	// Compute hash from content
 	hash := utils.ComputeHash(content)
+	fmt.Printf("DEBUG: Computed hash: %s\n", hash)
+
+	// Check if file with this hash already exists
+	existingFileJSON, err := GetFileByHash(ctx, hash)
+	if err != nil {
+		return fmt.Errorf("error checking existing file: %v", err)
+	}
+
+	var newVersion int
+	// var previousID string
+	var previousHash string
+	timestamp := time.Now().Format(time.RFC3339)
+
+	if existingFileJSON != "" {
+		// File exists - create new version
+		var previousFile models.File
+		err = json.Unmarshal([]byte(existingFileJSON), &previousFile)
+		if err != nil {
+			return fmt.Errorf("error unmarshaling existing file: %v", err)
+		}
+		newVersion = previousFile.Version + 1
+		previousHash = previousFile.Hash
+
+		fmt.Printf("DEBUG: Found existing file, creating version %d\n", newVersion)
+	} else {
+		newVersion = 1
+		previousHash = ""
+		fmt.Printf("DEBUG: No existing file found, creating version 1\n")
+	}
+
+	storageLocation := fmt.Sprintf("/tmp/files/%s", id)
 
 	file := models.File{
 		ID:              id,
 		Name:            name,
 		Hash:            hash,
-		StorageLocation: fmt.Sprintf("/tmp/files/%s", id),
-		Timestamp:       time.Now().Format(time.RFC3339),
+		StorageLocation: storageLocation,
+		Timestamp:       timestamp,
 		Owner:           owner,
 		Metadata:        metadata,
-		Version:         1,
-		PreviousHash:    "",
+		Version:         newVersion,
+		PreviousHash:    previousHash,
 	}
 
 	fileJSON, err := json.Marshal(file)
