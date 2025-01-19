@@ -106,7 +106,7 @@ func newIdentity() (*identity.X509Identity, error) {
 		"Admin@org1.example.com",
 		"msp",
 		"signcerts",
-		"cert.pem", // Changed from Admin@org1.example.com-cert.pem to cert.pem
+		"cert.pem",
 	)
 
 	// Debug print
