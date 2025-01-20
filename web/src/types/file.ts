@@ -8,4 +8,5 @@ export interface File {
     metadata: string;
     version: number;
     previousHash?: string;
+    content: string;
   }

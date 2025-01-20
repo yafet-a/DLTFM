@@ -15,6 +15,7 @@ type File struct {
 	Metadata        string `json:"metadata"`
 	Version         int    `json:"version"`
 	PreviousHash    string `json:"previousHash,omitempty"`
+	Content         string `json:"content"`
 }
 
 func (f *File) FormatCLI() string {
