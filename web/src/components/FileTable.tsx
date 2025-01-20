@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { File as FileIcon, ChevronDown, History, Eye, Share, ChevronRight } from 'lucide-react';
 import type { File as BlockchainFile } from '@/types/file';
-
+import FilePreviewModal from './FilePreviewModal';
 interface FileTableProps {
   files: BlockchainFile[];
   onViewHistory: (file: BlockchainFile) => void;
@@ -11,11 +11,14 @@ const FileTable = ({ files, onViewHistory }: FileTableProps) => {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [previewFile, setPreviewFile] = useState<BlockchainFile | null>(null);
+
+
 
   // Group files by hash
   const groupFilesByHash = useCallback((files: BlockchainFile[]) => {
     const groups = new Map<string, BlockchainFile[]>();
-    
+
     files.forEach(file => {
       const hash = file.hash;
       if (!groups.has(hash)) {
@@ -56,7 +59,7 @@ const FileTable = ({ files, onViewHistory }: FileTableProps) => {
   };
 
   const renderDropdown = (file: BlockchainFile, isBottom: boolean) => (
-    <div 
+    <div
       className="fixed z-50 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-gray-100 focus:outline-none"
       style={{
         position: 'absolute',
@@ -73,7 +76,13 @@ const FileTable = ({ files, onViewHistory }: FileTableProps) => {
           <History className="mr-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" />
           View History
         </button>
-        <button className="group flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 w-full">
+        <button
+          className="group flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 w-full"
+          onClick={() => {
+            setPreviewFile(file);
+            setOpenDropdown(null);
+          }}
+        >
           <Eye className="mr-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" />
           View File
         </button>
@@ -89,7 +98,7 @@ const FileTable = ({ files, onViewHistory }: FileTableProps) => {
     const latestFile = groupFiles[0]; // Already sorted by version
     const isExpanded = expandedGroups.has(hash);
     const showFiles = isExpanded ? groupFiles : [latestFile];
-    
+
     return showFiles.map((file, index) => (
       <tr key={file.id} className={`${index > 0 ? 'bg-gray-50/50' : ''}`}>
         <td className={`whitespace-nowrap ${index === 0 ? 'px-6' : 'px-12'} py-4 ${index === 0 ? '' : 'opacity-60'}`}>
@@ -99,8 +108,8 @@ const FileTable = ({ files, onViewHistory }: FileTableProps) => {
                 onClick={() => toggleGroup(hash)}
                 className="mr-2 p-1 hover:bg-gray-100 rounded transition-colors"
               >
-                <ChevronRight 
-                  size={16} 
+                <ChevronRight
+                  size={16}
                   className={`transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}
                 />
               </button>
@@ -152,24 +161,32 @@ const FileTable = ({ files, onViewHistory }: FileTableProps) => {
   };
 
   return (
-    <table className="min-w-full divide-y divide-gray-200">
-      <thead className="bg-gray-50">
-        <tr>
-          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Owner</th>
-          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
-          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hash</th>
-          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-        </tr>
-      </thead>
-      <tbody className="bg-white divide-y divide-gray-200">
-        {Array.from(fileGroups.entries()).map(([hash, groupFiles]) => (
-          renderFileGroup(hash, groupFiles)
-        ))}
-      </tbody>
-    </table>
+    <>
+      <table className="min-w-full divide-y divide-gray-200">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Owner</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hash</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-200">
+          {Array.from(fileGroups.entries()).map(([hash, groupFiles]) => (
+            renderFileGroup(hash, groupFiles)
+          ))}
+        </tbody>
+      </table>
+      {previewFile && (
+        <FilePreviewModal
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
+    </>
   );
-};
+}
 
 export default FileTable;
