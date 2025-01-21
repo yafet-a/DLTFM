@@ -3,6 +3,8 @@ package main
 import (
 	"crypto/sha256"
 	"dltfm/server/gateway"
+	"dltfm/server/middleware"
+	"dltfm/server/supabase"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -16,7 +18,7 @@ import (
 )
 
 func setEnvironmentVariables() error {
-	projectRoot := filepath.Join("..") // Go up one directory from server
+	projectRoot := filepath.Join("..")
 
 	envVars := map[string]string{
 		"PATH":                        fmt.Sprintf("%s:%s/fabric-samples/bin", os.Getenv("PATH"), projectRoot),
@@ -38,6 +40,12 @@ func setEnvironmentVariables() error {
 }
 
 func main() {
+	//Initialise  Supabase Client
+	supabaseClient, err := supabase.NewClient()
+	if err != nil {
+		log.Fatalf("Failed to create Supabase client: %v", err)
+	}
+
 	//Set environment variables before connecting to gateway
 	if err := setEnvironmentVariables(); err != nil {
 		log.Fatalf("Failed to set environment variables: %v", err)
@@ -55,22 +63,28 @@ func main() {
 	// Debug output to verify network and contract references
 	fmt.Println("DEBUG: Successfully retrieved network and contract references")
 
-	// // Test invocation
-	// fmt.Println("\n=== Testing QueryAllFiles invocation ===")
-	// result, err := contract.EvaluateTransaction("QueryAllFiles")
-	// if err != nil {
-	// 	log.Fatalf("Chaincode invocation failed: %v", err)
-	// }
-	// fmt.Printf("Chaincode output: %s\n", string(result))
-	// fmt.Println("=== Test complete ===")
-
 	r := gin.Default()
-	r.Use(cors.Default())
+
+	// Update CORS configuration to allow Authorization header
+	config := cors.DefaultConfig()
+	config.AllowHeaders = append(config.AllowHeaders, "Authorization")
+	config.AllowOrigins = []string{"http://localhost:3000"} // Point to frontend URL
+	r.Use(cors.New(config))
+
+	// Public routes (no auth required)
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 
 	api := r.Group("/api")
+	api.Use(middleware.AuthRequired(supabaseClient))
 	{
 		// Query all files - matches QueryAllFiles handler
 		api.GET("/files", func(c *gin.Context) {
+			userID := c.GetString("userID")
+			userCreds := c.MustGet("userCredentials").(*supabase.UserCredentials)
+
+			fmt.Printf("Authenticated user: %s, org: %s\n", userID, userCreds.OrgName)
 			// fmt.Printf("\nNew request at: %s\n", time.Now().Format(time.RFC3339))
 			// fmt.Printf("Request Headers: %+v\n", c.Request.Header)
 
@@ -95,6 +109,10 @@ func main() {
 
 		// Register file - matches RegisterFile handler
 		api.POST("/files", func(c *gin.Context) {
+			userID := c.GetString("userID")
+			userCreds := c.MustGet("userCredentials").(*supabase.UserCredentials)
+			fmt.Printf("Authenticated user: %s, org: %s\n", userID, userCreds.OrgName)
+
 			var request struct {
 				Name     string `json:"name"`
 				Content  string `json:"content"`
@@ -117,7 +135,7 @@ func main() {
 				id,
 				request.Name,
 				request.Content,
-				request.Owner,
+				userCreds.OrgName,
 				request.Metadata,
 			)
 
