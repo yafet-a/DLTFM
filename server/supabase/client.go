@@ -29,6 +29,58 @@ type UserCredentials struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+type Organization struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	FabricMSPID string    `json:"fabric_msp_id"`
+	CAURL       string    `json:"ca_url"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type UserOrganization struct {
+	UserID string       `json:"user_id"`
+	OrgID  string       `json:"org_id"`
+	Role   string       `json:"role"`
+	Org    Organization `json:"organizations"`
+}
+
+// Add this new method to your Client struct
+func (c *Client) GetUserOrganizations(userID string) ([]Organization, error) {
+	req, err := http.NewRequest("GET",
+		fmt.Sprintf("%s/rest/v1/user_organizations?user_id=eq.%s&select=organizations(*)", c.projectURL, userID),
+		nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("apikey", c.serviceKey)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.serviceKey))
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user organizations: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to get user organizations (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var userOrgs []UserOrganization
+	if err := json.NewDecoder(resp.Body).Decode(&userOrgs); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	organizations := make([]Organization, len(userOrgs))
+	for i, userOrg := range userOrgs {
+		organizations[i] = userOrg.Org
+	}
+
+	return organizations, nil
+}
+
 // NewClient creates a new Supabase client
 func NewClient() (*Client, error) {
 	// Load .env file
