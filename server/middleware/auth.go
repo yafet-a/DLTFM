@@ -32,16 +32,39 @@ func AuthRequired(supabaseClient *supabase.Client) gin.HandlerFunc {
 			return
 		}
 
-		// Get user's Fabric credentials
-		creds, err := supabaseClient.GetUserCredentials(userID)
+		// Get user's organizations
+		organizations, err := supabaseClient.GetUserOrganizations(userID)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user credentials"})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user organizations"})
 			return
 		}
 
-		// Store user info in context
+		// Get the organization context from headers
+		requestedMSPID := c.GetHeader("X-MSP-ID")
+		if requestedMSPID == "" {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "No organization specified"})
+			return
+		}
+
+		// Verify user has access to the requested organization
+		var validOrg *supabase.Organization
+		for _, org := range organizations {
+			if org.FabricMSPID == requestedMSPID {
+				validOrg = &org
+				break
+			}
+		}
+
+		if validOrg == nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "User does not have access to this organization"})
+			return
+		}
+
+		// Store user and organization info in context
 		c.Set("userID", userID)
-		c.Set("userCredentials", creds)
+		c.Set("organization", validOrg)
+		c.Set("orgName", validOrg.Name)
+		c.Set("mspID", validOrg.FabricMSPID)
 
 		c.Next()
 	}
