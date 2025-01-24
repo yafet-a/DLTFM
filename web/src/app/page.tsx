@@ -32,10 +32,43 @@ export default function Home() {
 
 
   useEffect(() => {
-    if (session && currentOrg && !orgLoading) {  // Only proceed when everything is ready
+    if (session && currentOrg && !orgLoading) {
+      // Initial load of files
       loadFiles();
-      const interval = setInterval(checkConnection, 5000);
-      return () => clearInterval(interval);
+      setIsConnected(true); // Initial connection state
+  
+      // Set up realtime subscription
+      const channel = supabase
+        .channel('files-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'files'
+          },
+          (payload) => {
+            console.log('Realtime update received:', payload);
+            loadFiles(); // Reload files when any change happens
+          }
+        )
+        .subscribe((status) => {
+          console.log('Subscription status:', status);
+          
+          if (status === 'SUBSCRIBED') {
+            setIsConnected(true);
+          } else {
+            setIsConnected(false);
+          }
+        });
+  
+      return () => {
+        // Cleanup subscription on unmount
+        console.log('Cleaning up subscription');
+        supabase.removeChannel(channel);
+      };
+    } else {
+      setIsConnected(false);
     }
   }, [session, currentOrg, orgLoading]);
 
@@ -48,21 +81,21 @@ export default function Home() {
     };
   }, [previewUrl]);
 
-  const checkConnection = async () => {
-    try {
-      await axios.get('http://localhost:8080/api/files', {
-        headers: {
-          Authorization: `Bearer ${session?.access_token}`,
-          'X-Organization-ID': currentOrg?.id,
-          'X-MSP-ID': currentOrg?.fabric_msp_id
+  // const checkConnection = async () => {
+  //   try {
+  //     await axios.get('http://localhost:8080/api/files', {
+  //       headers: {
+  //         Authorization: `Bearer ${session?.access_token}`,
+  //         'X-Organization-ID': currentOrg?.id,
+  //         'X-MSP-ID': currentOrg?.fabric_msp_id
 
-        }
-      });
-      setIsConnected(true);
-    } catch (err) {
-      setIsConnected(false);
-    }
-  };
+  //       }
+  //     });
+  //     setIsConnected(true);
+  //   } catch (err) {
+  //     setIsConnected(false);
+  //   }
+  // };
 
   const handleLogout = async () => {
     try {
