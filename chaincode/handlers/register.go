@@ -58,6 +58,7 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 		Metadata:        metadata,
 		Version:         newVersion,
 		PreviousHash:    previousHash,
+		Content:         content,
 	}
 
 	fileJSON, err := json.Marshal(file)
