@@ -19,25 +19,49 @@ func getFabricSamplesDir() string {
 	return filepath.Join("..", "fabric-samples")
 }
 
-func Connect() (*client.Gateway, error) {
-	fmt.Println("Starting Gateway connection...")
+type OrgConfig struct {
+	MSPID      string
+	PeerPort   string
+	CryptoPath string
+}
 
-	clientConnection := newGrpcConnection()
+func getOrgConfig(mspID string) OrgConfig {
+	switch mspID {
+	case "Org2MSP":
+		return OrgConfig{
+			MSPID:      "Org2MSP",
+			PeerPort:   "9051",
+			CryptoPath: "org2.example.com",
+		}
+	default: // Default to Org1
+		return OrgConfig{
+			MSPID:      "Org1MSP",
+			PeerPort:   "7051",
+			CryptoPath: "org1.example.com",
+		}
+	}
+}
+
+func Connect(mspID string) (*client.Gateway, error) {
+	fmt.Printf("Starting Gateway connection for MSP: %s\n", mspID)
+
+	orgConfig := getOrgConfig(mspID)
+
+	clientConnection := newGrpcConnection(orgConfig)
 	fmt.Println("gRPC connection established")
 
-	id, err := newIdentity()
+	id, err := newIdentity(orgConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create identity: %w", err)
 	}
 	fmt.Println("Identity created")
 
-	sign, err := newSign()
+	sign, err := newSign(orgConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signer: %w", err)
 	}
 	fmt.Println("Signer created")
 
-	// Create a Gateway connection with default timeouts
 	gw, err := client.Connect(
 		id,
 		client.WithSign(sign),
@@ -51,7 +75,7 @@ func Connect() (*client.Gateway, error) {
 	return gw, nil
 }
 
-func newGrpcConnection() *grpc.ClientConn {
+func newGrpcConnection(config OrgConfig) *grpc.ClientConn {
 	fmt.Println("Setting up gRPC connection...")
 
 	tlsCertPath := filepath.Join(
@@ -59,9 +83,9 @@ func newGrpcConnection() *grpc.ClientConn {
 		"test-network",
 		"organizations",
 		"peerOrganizations",
-		"org1.example.com",
+		config.CryptoPath,
 		"peers",
-		"peer0.org1.example.com",
+		fmt.Sprintf("peer0.%s", config.CryptoPath),
 		"tls",
 		"ca.crt",
 	)
@@ -78,39 +102,35 @@ func newGrpcConnection() *grpc.ClientConn {
 	transportCredentials := credentials.NewClientTLSFromCert(certPool, "")
 
 	connection, err := grpc.Dial(
-		"localhost:7051",
+		fmt.Sprintf("localhost:%s", config.PeerPort),
 		grpc.WithTransportCredentials(transportCredentials),
 		grpc.WithBlock(),
 		grpc.WithDefaultCallOptions(
 			grpc.WaitForReady(true),
-			grpc.MaxCallRecvMsgSize(20*1024*1024), // 20MB
-			grpc.MaxCallSendMsgSize(20*1024*1024), // 20MB
+			grpc.MaxCallRecvMsgSize(20*1024*1024),
+			grpc.MaxCallSendMsgSize(20*1024*1024),
 		),
 	)
 	if err != nil {
 		panic(fmt.Errorf("failed to create gRPC connection: %w", err))
 	}
-	fmt.Println("gRPC connection established successfully")
 
 	return connection
 }
 
-func newIdentity() (*identity.X509Identity, error) {
+func newIdentity(config OrgConfig) (*identity.X509Identity, error) {
 	certPath := filepath.Join(
 		getFabricSamplesDir(),
 		"test-network",
 		"organizations",
 		"peerOrganizations",
-		"org1.example.com",
+		config.CryptoPath,
 		"users",
-		"Admin@org1.example.com",
+		fmt.Sprintf("Admin@%s", config.CryptoPath),
 		"msp",
 		"signcerts",
 		"cert.pem",
 	)
-
-	// Debug print
-	fmt.Printf("Looking for certificate at: %s\n", certPath)
 
 	certificatePEM, err := ioutil.ReadFile(certPath)
 	if err != nil {
@@ -122,7 +142,7 @@ func newIdentity() (*identity.X509Identity, error) {
 		return nil, fmt.Errorf("failed to create certificate from PEM: %w", err)
 	}
 
-	id, err := identity.NewX509Identity("Org1MSP", certificate)
+	id, err := identity.NewX509Identity(config.MSPID, certificate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create identity: %w", err)
 	}
@@ -130,28 +150,24 @@ func newIdentity() (*identity.X509Identity, error) {
 	return id, nil
 }
 
-func newSign() (identity.Sign, error) {
+func newSign(config OrgConfig) (identity.Sign, error) {
 	keyPath := filepath.Join(
 		getFabricSamplesDir(),
 		"test-network",
 		"organizations",
 		"peerOrganizations",
-		"org1.example.com",
+		config.CryptoPath,
 		"users",
-		"Admin@org1.example.com",
+		fmt.Sprintf("Admin@%s", config.CryptoPath),
 		"msp",
 		"keystore",
-		// The actual key file will be named something random. We need to read the directory
-		// and find the first file, as it will be the private key
 	)
 
-	// Read the keystore directory
 	files, err := ioutil.ReadDir(keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read keystore directory: %w", err)
 	}
 
-	// Find the first file (should be the private key)
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no private key found in keystore directory")
 	}

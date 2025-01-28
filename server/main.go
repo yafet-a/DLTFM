@@ -3,98 +3,159 @@ package main
 import (
 	"crypto/sha256"
 	"dltfm/server/gateway"
+	"dltfm/server/middleware"
+	"dltfm/server/supabase"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
+
+	// "os"
+	// "path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/hyperledger/fabric-gateway/pkg/client"
 )
 
-func setEnvironmentVariables() error {
-	projectRoot := filepath.Join("..") // Go up one directory from server
+type GatewayManager struct {
+	gateways map[string]*client.Gateway
+	mu       sync.RWMutex
+}
 
-	envVars := map[string]string{
-		"PATH":                        fmt.Sprintf("%s:%s/fabric-samples/bin", os.Getenv("PATH"), projectRoot),
-		"FABRIC_CFG_PATH":             filepath.Join(projectRoot, "fabric-samples/config"),
-		"CORE_PEER_TLS_ENABLED":       "true",
-		"CORE_PEER_LOCALMSPID":        "Org1MSP",
-		"CORE_PEER_TLS_ROOTCERT_FILE": filepath.Join(projectRoot, "fabric-samples/test-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt"),
-		"CORE_PEER_MSPCONFIGPATH":     filepath.Join(projectRoot, "fabric-samples/test-network/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp"),
-		"CORE_PEER_ADDRESS":           "localhost:7051",
+func NewGatewayManager() *GatewayManager {
+	return &GatewayManager{
+		gateways: make(map[string]*client.Gateway),
+	}
+}
+
+func (gm *GatewayManager) GetGateway(mspID string) (*client.Gateway, error) {
+	gm.mu.RLock()
+	gw, exists := gm.gateways[mspID]
+	gm.mu.RUnlock()
+
+	if exists {
+		return gw, nil
 	}
 
-	for key, value := range envVars {
-		if err := os.Setenv(key, value); err != nil {
-			return fmt.Errorf("failed to set %s: %w", key, err)
-		}
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	// Check again in case another goroutine created the gateway
+	if gw, exists = gm.gateways[mspID]; exists {
+		return gw, nil
 	}
 
-	return nil
+	// Create new gateway connection
+	gw, err := gateway.Connect(mspID)
+	if err != nil {
+		return nil, err
+	}
+
+	gm.gateways[mspID] = gw
+	return gw, nil
+}
+
+func (gm *GatewayManager) Close() {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	for _, gw := range gm.gateways {
+		gw.Close()
+	}
 }
 
 func main() {
-	//Set environment variables before connecting to gateway
-	if err := setEnvironmentVariables(); err != nil {
-		log.Fatalf("Failed to set environment variables: %v", err)
-	}
-	// Connect to gateway
-	gw, err := gateway.Connect()
+	// Initialize Supabase Client
+	supabaseClient, err := supabase.NewClient()
 	if err != nil {
-		log.Fatalf("Failed to connect to gateway: %v", err)
+		log.Fatalf("Failed to create Supabase client: %v", err)
 	}
-	defer gw.Close()
 
-	network := gw.GetNetwork("mychannel")
-	contract := network.GetContract("chaincode")
-
-	// Debug output to verify network and contract references
-	fmt.Println("DEBUG: Successfully retrieved network and contract references")
-
-	// // Test invocation
-	// fmt.Println("\n=== Testing QueryAllFiles invocation ===")
-	// result, err := contract.EvaluateTransaction("QueryAllFiles")
-	// if err != nil {
-	// 	log.Fatalf("Chaincode invocation failed: %v", err)
-	// }
-	// fmt.Printf("Chaincode output: %s\n", string(result))
-	// fmt.Println("=== Test complete ===")
+	// Create gateway manager
+	gatewayManager := NewGatewayManager()
+	defer gatewayManager.Close()
 
 	r := gin.Default()
-	r.Use(cors.Default())
+
+	// Update CORS configuration to allow Organization headers
+	config := cors.Config{
+		AllowOrigins: []string{"http://localhost:3000"},
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{
+			"Origin",
+			"Content-Type",
+			"Accept",
+			"Authorization",
+			"X-Organization-ID",
+			"X-MSP-ID",
+		},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}
+	r.Use(cors.New(config))
+
+	// Public routes
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 
 	api := r.Group("/api")
+	api.Use(middleware.AuthRequired(supabaseClient))
 	{
-		// Query all files - matches QueryAllFiles handler
 		api.GET("/files", func(c *gin.Context) {
-			// fmt.Printf("\nNew request at: %s\n", time.Now().Format(time.RFC3339))
-			// fmt.Printf("Request Headers: %+v\n", c.Request.Header)
+			userID := c.GetString("userID")
+			mspID := c.GetString("mspID")
+			org := c.MustGet("organization").(*supabase.Organization)
 
-			fmt.Println("Evaluating QueryAllFiles transaction...")
+			fmt.Printf("Request from user: %s, organization: %s (MSP: %s)\n",
+				userID, org.Name, mspID)
+
+			// Get the appropriate gateway for this organization
+			gw, err := gatewayManager.GetGateway(mspID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("failed to get gateway: %v", err),
+				})
+				return
+			}
+
+			network := gw.GetNetwork("mychannel")
+			contract := network.GetContract("chaincode")
+
 			result, err := contract.EvaluateTransaction("QueryAllFiles")
 			if err != nil {
 				fmt.Printf("Error during evaluation: %v\n", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to query files: %v", err)})
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("failed to query files: %v", err),
+				})
 				return
 			}
 
 			var files []interface{}
 			if err := json.Unmarshal(result, &files); err != nil {
 				fmt.Printf("Error unmarshaling result: %v\n", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse response"})
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": "failed to parse response",
+				})
 				return
 			}
 
-			fmt.Printf("Successfully retrieved %d files\n", len(files))
+			fmt.Printf("Successfully retrieved %d files for org %s\n", len(files), org.Name)
 			c.JSON(http.StatusOK, files)
 		})
 
-		// Register file - matches RegisterFile handler
 		api.POST("/files", func(c *gin.Context) {
+			userID := c.GetString("userID")
+			mspID := c.GetString("mspID")
+			org := c.MustGet("organization").(*supabase.Organization)
+
+			fmt.Printf("Upload request from user: %s, organization: %s (MSP: %s)\n",
+				userID, org.Name, mspID)
+
 			var request struct {
 				Name     string `json:"name"`
 				Content  string `json:"content"`
@@ -107,29 +168,46 @@ func main() {
 				return
 			}
 
-			// Generate id that includes hash to ensure same file gets same base ID
+			// Get the appropriate gateway for this organization
+			gw, err := gatewayManager.GetGateway(mspID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("failed to get gateway: %v", err),
+				})
+				return
+			}
+
+			network := gw.GetNetwork("mychannel")
+			contract := network.GetContract("chaincode")
+
+			// Generate id that includes hash
 			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(request.Content)))
 			id := fmt.Sprintf("file_%s_%d", hash[:8], time.Now().UnixNano())
 
-			fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s\n", id, request.Name)
+			fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s, org=%s\n",
+				id, request.Name, org.Name)
 
-			_, err := contract.SubmitTransaction("RegisterFile",
+			_, err = contract.SubmitTransaction("RegisterFile",
 				id,
 				request.Name,
 				request.Content,
-				request.Owner,
+				org.Name,
 				request.Metadata,
 			)
 
 			if err != nil {
 				log.Printf("ERROR: Failed to register file: %v\n", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to register file: %v", err)})
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("failed to register file: %v", err),
+				})
 				return
 			}
 
-			c.JSON(http.StatusOK, gin.H{"message": "File successfully registered", "id": id})
+			c.JSON(http.StatusOK, gin.H{
+				"message": "File successfully registered",
+				"id":      id,
+			})
 		})
-
 	}
 
 	log.Println("Starting server on :8080...")
