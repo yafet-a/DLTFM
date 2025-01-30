@@ -46,10 +46,10 @@ const VersionHistoryModal = ({ file, versions, onClose }: VersionHistoryModalPro
                 </div>
 
                 <ul className="mt-6 space-y-6">
-                  {sortedVersions.map((version) => (
+                  {sortedVersions.map((version, index) => (
                     <li key={version.id} className="relative flex gap-x-4">
                       <div className="absolute left-0 top-0 flex w-6 justify-center -bottom-6">
-                        <div className="w-px bg-gray-200"></div>
+                        {index < sortedVersions.length - 1 && <div className="w-px bg-gray-200"></div>}
                       </div>
                       <div className="relative flex h-6 w-6 flex-none items-center justify-center bg-white">
                         <div className="h-1.5 w-1.5 rounded-full bg-gray-100 ring-1 ring-gray-300"></div>
@@ -58,7 +58,7 @@ const VersionHistoryModal = ({ file, versions, onClose }: VersionHistoryModalPro
                         <div className="flex items-baseline justify-between gap-x-4">
                           <div>
                             <p className="text-sm font-semibold text-gray-900">
-                              Version {version.version}
+                              Version {version.version} {index === 0 && <span className="text-blue-500 text-xs">(Latest)</span>}
                             </p>
                             <p className="mt-1 text-sm text-gray-500">
                               Updated by {version.owner}
@@ -75,6 +75,7 @@ const VersionHistoryModal = ({ file, versions, onClose }: VersionHistoryModalPro
                     </li>
                   ))}
                 </ul>
+
               </div>
             </div>
           </div>
