@@ -67,6 +67,13 @@ func (gm *GatewayManager) Close() {
 	}
 }
 
+// Generate a unique file ID based on name and timestamp
+func GenerateFileID(name string, timestamp string) string {
+	data := fmt.Sprintf("%s_%s", name, timestamp)
+	hash := sha256.Sum256([]byte(data))
+	return fmt.Sprintf("%x", hash[:8]) // Take first 8 bytes
+}
+
 func main() {
 	// Initialize Supabase Client
 	supabaseClient, err := supabase.NewClient()
@@ -82,16 +89,9 @@ func main() {
 
 	// Update CORS configuration to allow Organization headers
 	config := cors.Config{
-		AllowOrigins: []string{"http://localhost:3000"},
-		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders: []string{
-			"Origin",
-			"Content-Type",
-			"Accept",
-			"Authorization",
-			"X-Organization-ID",
-			"X-MSP-ID",
-		},
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Organization-ID", "X-MSP-ID"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
@@ -106,20 +106,18 @@ func main() {
 	api := r.Group("/api")
 	api.Use(middleware.AuthRequired(supabaseClient))
 	{
+		// Fetch all files
 		api.GET("/files", func(c *gin.Context) {
 			userID := c.GetString("userID")
 			mspID := c.GetString("mspID")
 			org := c.MustGet("organization").(*supabase.Organization)
 
-			fmt.Printf("Request from user: %s, organization: %s (MSP: %s)\n",
-				userID, org.Name, mspID)
+			fmt.Printf("Request from user: %s, organization: %s (MSP: %s)\n", userID, org.Name, mspID)
 
 			// Get the appropriate gateway for this organization
 			gw, err := gatewayManager.GetGateway(mspID)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": fmt.Sprintf("failed to get gateway: %v", err),
-				})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get gateway: %v", err)})
 				return
 			}
 
@@ -129,18 +127,14 @@ func main() {
 			result, err := contract.EvaluateTransaction("QueryAllFiles")
 			if err != nil {
 				fmt.Printf("Error during evaluation: %v\n", err)
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": fmt.Sprintf("failed to query files: %v", err),
-				})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to query files: %v", err)})
 				return
 			}
 
 			var files []interface{}
 			if err := json.Unmarshal(result, &files); err != nil {
 				fmt.Printf("Error unmarshaling result: %v\n", err)
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": "failed to parse response",
-				})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse response"})
 				return
 			}
 
@@ -148,19 +142,50 @@ func main() {
 			c.JSON(http.StatusOK, files)
 		})
 
+		// Fetch file versions
+		api.GET("/files/:id/versions", func(c *gin.Context) {
+			userID := c.GetString("userID")
+			mspID := c.GetString("mspID")
+			org := c.MustGet("organization").(*supabase.Organization)
+
+			fileID := c.Param("id")
+
+			fmt.Printf("Request for file versions: %s, user: %s, org: %s (MSP: %s)\n", fileID, userID, org.Name, mspID)
+
+			// Get the appropriate gateway for this organization
+			gw, err := gatewayManager.GetGateway(mspID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get gateway: %v", err)})
+				return
+			}
+
+			network := gw.GetNetwork("mychannel")
+			contract := network.GetContract("chaincode")
+
+			result, err := contract.EvaluateTransaction("GetFileVersions", fileID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to fetch version history: %v", err)})
+				return
+			}
+
+			c.JSON(http.StatusOK, json.RawMessage(result))
+		})
+
+		// Register a new file
 		api.POST("/files", func(c *gin.Context) {
 			userID := c.GetString("userID")
 			mspID := c.GetString("mspID")
 			org := c.MustGet("organization").(*supabase.Organization)
 
-			fmt.Printf("Upload request from user: %s, organization: %s (MSP: %s)\n",
-				userID, org.Name, mspID)
+			fmt.Printf("Upload request from user: %s, organization: %s (MSP: %s)\n", userID, org.Name, mspID)
 
 			var request struct {
-				Name     string `json:"name"`
-				Content  string `json:"content"`
-				Owner    string `json:"owner"`
-				Metadata string `json:"metadata"`
+				ID         string `json:"id"`
+				Name       string `json:"name"`
+				Content    string `json:"content"`
+				Owner      string `json:"owner"`
+				Metadata   string `json:"metadata"`
+				PreviousID string `json:"previousID"`
 			}
 
 			if err := c.BindJSON(&request); err != nil {
@@ -180,19 +205,16 @@ func main() {
 			network := gw.GetNetwork("mychannel")
 			contract := network.GetContract("chaincode")
 
-			// Generate id that includes hash
-			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(request.Content)))
-			id := fmt.Sprintf("file_%s_%d", hash[:8], time.Now().UnixNano())
-
-			fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s, org=%s\n",
-				id, request.Name, org.Name)
+			fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s, org=%s, previousID=%s\n",
+				request.ID, request.Name, org.Name, request.PreviousID)
 
 			_, err = contract.SubmitTransaction("RegisterFile",
-				id,
+				request.ID, // ID should be provided by the client
 				request.Name,
 				request.Content,
 				org.Name,
 				request.Metadata,
+				request.PreviousID,
 			)
 
 			if err != nil {
@@ -205,9 +227,10 @@ func main() {
 
 			c.JSON(http.StatusOK, gin.H{
 				"message": "File successfully registered",
-				"id":      id,
+				"id":      request.ID,
 			})
 		})
+
 	}
 
 	log.Println("Starting server on :8080...")
