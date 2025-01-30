@@ -1,18 +1,19 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronDown, Upload, User } from 'lucide-react';
 import axios from 'axios';
 import type { File as BlockchainFile } from '@/types/file';
 import FilePreview from '@/components/FilePreview';
 import FileTable from '@/components/FileTable';
-import VersionHistoryModal from '@/components/VersionHistoryModal';
+import VersionHistorySheet from '@/components/VersionHistorySheet';
 import { LoginScreen } from '@/components/Auth';
 import { useAuth } from '@/contexts/AuthContext'
 import { useOrg } from '@/contexts/OrgContext';;
 import OrganizationSelector from '@/components/OrgSelector';
 import { supabase } from '@/lib/supabase';
 import OrganizationOnboarding from '@/components/OrganizationOnboarding';
+import { v4 as uuidv4 } from 'uuid';
 
 export default function Home() {
   const { session, user } = useAuth();
@@ -23,90 +24,16 @@ export default function Home() {
   const [isConnected, setIsConnected] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<globalThis.File | null>(null);
+  const [selectedPreviousFile, setSelectedPreviousFile] = useState<string | undefined>(undefined);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedVersionFile, setSelectedVersionFile] = useState<BlockchainFile | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { currentOrg, loading: orgLoading } = useOrg();
   const [showUserMenu, setShowUserMenu] = useState(false);
 
-
-
-  useEffect(() => {
-    if (session && currentOrg && !orgLoading) {
-      // Initial load of files
-      loadFiles();
-      setIsConnected(true); // Initial connection state
-  
-      // Set up realtime subscription
-      const channel = supabase
-        .channel('files-changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'files'
-          },
-          (payload) => {
-            console.log('Realtime update received:', payload);
-            loadFiles(); // Reload files when any change happens
-          }
-        )
-        .subscribe((status) => {
-          console.log('Subscription status:', status);
-          
-          if (status === 'SUBSCRIBED') {
-            setIsConnected(true);
-          } else {
-            setIsConnected(false);
-          }
-        });
-  
-      return () => {
-        // Cleanup subscription on unmount
-        console.log('Cleaning up subscription');
-        supabase.removeChannel(channel);
-      };
-    } else {
-      setIsConnected(false);
-    }
-  }, [session, currentOrg, orgLoading]);
-
-  useEffect(() => {
-    // Cleanup preview URL when component unmounts or file changes
-    return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-      }
-    };
-  }, [previewUrl]);
-
-  // const checkConnection = async () => {
-  //   try {
-  //     await axios.get('http://localhost:8080/api/files', {
-  //       headers: {
-  //         Authorization: `Bearer ${session?.access_token}`,
-  //         'X-Organization-ID': currentOrg?.id,
-  //         'X-MSP-ID': currentOrg?.fabric_msp_id
-
-  //       }
-  //     });
-  //     setIsConnected(true);
-  //   } catch (err) {
-  //     setIsConnected(false);
-  //   }
-  // };
-
-  const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut();
-      window.location.reload(); // Refresh the page after logout
-    } catch (error) {
-      console.error('Error signing out:', error);
-    }
-  };
-
-  const loadFiles = async () => {
+  const loadFiles = useCallback(async () => {
+    if (!session || !currentOrg) return;
+    
     try {
       setLoading(true);
       const response = await axios.get<BlockchainFile[]>('http://localhost:8080/api/files', {
@@ -123,7 +50,49 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [session, currentOrg]);
+
+  useEffect(() => {
+    if (session && currentOrg && !orgLoading) {
+      loadFiles();
+      setIsConnected(true);
+    } else {
+      setIsConnected(false);
+    }
+  }, [session, currentOrg, orgLoading, loadFiles]);
+
+  useEffect(() => {
+    if (!session || !currentOrg) return;
+
+    const channel = supabase
+      .channel('files-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'files'
+        },
+        () => {
+          loadFiles();
+        }
+      )
+      .subscribe((status) => {
+        setIsConnected(status === 'SUBSCRIBED');
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session, currentOrg, loadFiles]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -134,12 +103,12 @@ export default function Home() {
       setDragActive(false);
     }
   };
-
+  
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-
+    
     const droppedFiles = Array.from(e.dataTransfer.files);
     if (droppedFiles.length > 0) {
       const file = droppedFiles[0];
@@ -151,6 +120,15 @@ export default function Home() {
       } else {
         setPreviewUrl(null);
       }
+    }
+  };
+  
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      window.location.reload(); // Refresh the page after logout
+    } catch (error) {
+      console.error('Error signing out:', error);
     }
   };
 
@@ -172,7 +150,7 @@ export default function Home() {
     }
   };
 
-  const handleFileUpload = async (file: globalThis.File) => {
+  const handleFileUpload = async (file: globalThis.File, previousID?: string) => {
     try {
       setUploading(true);
       setError(null);
@@ -187,11 +165,15 @@ export default function Home() {
       };
 
       const payload = {
+        id: uuidv4(),
         name: file.name,
         content: content,
-        owner: user?.email || 'unknown',  // Use user's email instead of hardcoded 'user1'
-        metadata: JSON.stringify(metadata)
+        owner: user?.email || "unknown",
+        metadata: JSON.stringify(metadata),
+        previousID: previousID || "", // Send previousID if selected, else empty string
       };
+
+      // console.log("DEBUG: Sending payload to backend", payload);
 
       await axios.post('http://localhost:8080/api/files', payload, {
         headers: {
@@ -350,6 +332,24 @@ export default function Home() {
           <div className="mb-6 bg-white shadow rounded-lg p-6">
             <h4 className="text-lg font-medium text-gray-900 mb-4">Preview:</h4>
             <FilePreview file={selectedFile} previewUrl={previewUrl} />
+            
+            {/* Add version selector here */}
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700">Versioning:</label>
+              <select
+                className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"
+                onChange={(e) => setSelectedPreviousFile(e.target.value || undefined)}
+                value={selectedPreviousFile || ""}
+              >
+                <option value="">New File</option>
+                {files.map((file) => (
+                  <option key={file.id} value={file.id}>
+                    Update {file.name} (v{file.version})
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="mt-4 flex justify-end space-x-3">
               <button
                 className="px-4 py-2 text-sm text-gray-600 hover:text-gray-700 focus:outline-none"
@@ -365,7 +365,7 @@ export default function Home() {
               </button>
               <button
                 className="px-4 py-2 text-sm text-white bg-indigo-600 hover:bg-indigo-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition duration-150 ease-in-out"
-                onClick={() => selectedFile && handleFileUpload(selectedFile)}
+                onClick={() => selectedFile && handleFileUpload(selectedFile, selectedPreviousFile)}
                 disabled={uploading}
               >
                 Upload File
@@ -391,9 +391,10 @@ export default function Home() {
       </main>
 
       {selectedVersionFile && (
-        <VersionHistoryModal
+        <VersionHistorySheet
           file={selectedVersionFile}
           versions={getFileVersions(selectedVersionFile)}
+          open={true}
           onClose={() => setSelectedVersionFile(null)}
         />
       )}

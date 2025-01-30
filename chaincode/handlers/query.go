@@ -8,20 +8,16 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
+// Query all files in the ledger
 func QueryAllFiles(ctx contractapi.TransactionContextInterface) (string, error) {
 	fmt.Println("DEBUG: Starting QueryAllFiles")
 
-	stub := ctx.GetStub()
-	fmt.Printf("DEBUG: Stub initialized: %v\n", stub != nil)
-
-	resultsIterator, err := stub.GetStateByRange("", "")
+	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
 	if err != nil {
 		fmt.Printf("ERROR: Failed to get state range: %v\n", err)
 		return "", fmt.Errorf("failed to get state range: %v", err)
 	}
 	defer resultsIterator.Close()
-
-	fmt.Println("DEBUG: Got iterator, checking for results...")
 
 	var files []models.File
 	for resultsIterator.HasNext() {
@@ -30,8 +26,6 @@ func QueryAllFiles(ctx contractapi.TransactionContextInterface) (string, error) 
 			fmt.Printf("ERROR: Failed to iterate state: %v\n", err)
 			return "", fmt.Errorf("failed to iterate state: %v", err)
 		}
-
-		fmt.Printf("DEBUG: Found Key: %s, Value: %s\n", response.Key, string(response.Value))
 
 		var file models.File
 		err = json.Unmarshal(response.Value, &file)
@@ -44,8 +38,7 @@ func QueryAllFiles(ctx contractapi.TransactionContextInterface) (string, error) 
 	}
 
 	if len(files) == 0 {
-		fmt.Println("DEBUG: No files found in state")
-		return "[]", nil
+		return "[]", nil // Return empty JSON array
 	}
 
 	filesJSON, err := json.Marshal(files)
@@ -56,21 +49,52 @@ func QueryAllFiles(ctx contractapi.TransactionContextInterface) (string, error) 
 	return string(filesJSON), nil
 }
 
+// Retrieve a file by ID
 func GetFileByID(ctx contractapi.TransactionContextInterface, id string) (string, error) {
 	fileJSON, err := ctx.GetStub().GetState(id)
 	if err != nil {
 		return "", fmt.Errorf("failed to read from world state: %v", err)
 	}
 	if fileJSON == nil {
-		return "", fmt.Errorf("file with ID %s not found", id)
+		return "", nil // Instead of returning an error, return nil to indicate the file wasn't found
 	}
 	return string(fileJSON), nil
 }
 
-func GetFileByHash(ctx contractapi.TransactionContextInterface, hash string) (string, error) {
-	fmt.Printf("DEBUG: Searching for file with hash: %s\n", hash)
+// Retrieve all versions of a file
+func GetFileVersions(ctx contractapi.TransactionContextInterface, id string) (string, error) {
+	var versions []models.File
+	currentID := id
 
-	// Using an empty string to get all states
+	for currentID != "" {
+		fileJSON, err := GetFileByID(ctx, currentID)
+		if err != nil {
+			return "", fmt.Errorf("failed to fetch version history: %v", err)
+		}
+		if fileJSON == "" {
+			break // Stop if there is no previous version
+		}
+
+		var file models.File
+		err = json.Unmarshal([]byte(fileJSON), &file)
+		if err != nil {
+			return "", fmt.Errorf("error unmarshaling file: %v", err)
+		}
+
+		versions = append(versions, file)
+		currentID = file.PreviousID // Move to the previous version
+	}
+
+	filesJSON, err := json.Marshal(versions)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal version history: %v", err)
+	}
+
+	return string(filesJSON), nil
+}
+
+// Retrieve a file by its hash value
+func GetFileByHash(ctx contractapi.TransactionContextInterface, hash string) (string, error) {
 	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
 	if err != nil {
 		return "", fmt.Errorf("failed to get state range: %v", err)
@@ -86,7 +110,7 @@ func GetFileByHash(ctx contractapi.TransactionContextInterface, hash string) (st
 		var file models.File
 		err = json.Unmarshal(response.Value, &file)
 		if err != nil {
-			continue
+			continue // Skip invalid entries instead of failing
 		}
 
 		if file.Hash == hash {

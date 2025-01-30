@@ -1,6 +1,7 @@
 import React from 'react';
-import { X, FileIcon, Image as ImageIcon, FileText, AlertCircle } from 'lucide-react';
+import { X, FileIcon, AlertCircle } from 'lucide-react';
 import type { File as BlockchainFile } from '@/types/file';
+import Image from 'next/image';
 
 interface FilePreviewModalProps {
   file: BlockchainFile;
@@ -27,9 +28,11 @@ const FilePreviewModal = ({ file, onClose }: FilePreviewModalProps) => {
       if (isImage) {
         return (
           <div className="flex items-center justify-center">
-            <img 
+            <Image 
               src={`data:${metadata.type};base64,${file.content}`}
               alt={file.name}
+              width={900}
+              height={800}
               className="max-w-full max-h-[70vh] object-contain"
             />
           </div>
@@ -66,7 +69,7 @@ const FilePreviewModal = ({ file, onClose }: FilePreviewModalProps) => {
       return (
         <div className="flex flex-col items-center justify-center text-red-500">
           <AlertCircle size={48} className="mb-2" />
-          <p>Error loading preview</p>
+          <p>Error loading preview: {error instanceof Error ? error.message : 'Unknown error'}</p>
         </div>
       );
     }

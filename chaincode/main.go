@@ -11,8 +11,8 @@ type SmartContract struct {
 	contractapi.Contract
 }
 
-func (s *SmartContract) RegisterFile(ctx contractapi.TransactionContextInterface, id string, name string, content string, owner string, metadata string) error {
-	return handlers.RegisterFile(ctx, id, name, content, owner, metadata)
+func (s *SmartContract) RegisterFile(ctx contractapi.TransactionContextInterface, id string, name string, content string, owner string, metadata string, previousID string) error {
+	return handlers.RegisterFile(ctx, id, name, content, owner, metadata, previousID)
 }
 
 func (s *SmartContract) QueryAllFiles(ctx contractapi.TransactionContextInterface) (string, error) {
