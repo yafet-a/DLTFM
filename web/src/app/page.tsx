@@ -6,7 +6,7 @@ import axios from 'axios';
 import type { File as BlockchainFile } from '@/types/file';
 import FilePreview from '@/components/FilePreview';
 import FileTable from '@/components/FileTable';
-import VersionHistoryModal from '@/components/VersionHistoryModal';
+import VersionHistorySheet from '@/components/VersionHistorySheet';
 import { LoginScreen } from '@/components/Auth';
 import { useAuth } from '@/contexts/AuthContext'
 import { useOrg } from '@/contexts/OrgContext';;
@@ -415,9 +415,10 @@ export default function Home() {
       </main>
 
       {selectedVersionFile && (
-        <VersionHistoryModal
+        <VersionHistorySheet
           file={selectedVersionFile}
           versions={getFileVersions(selectedVersionFile)}
+          open={true}
           onClose={() => setSelectedVersionFile(null)}
         />
       )}
