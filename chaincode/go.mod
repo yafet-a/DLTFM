@@ -3,12 +3,11 @@ module dltfm/chaincode
 go 1.23.3
 
 require (
-	github.com/hyperledger/fabric-contract-api-go v1.2.2
 	dltfm/pkg/models v0.0.0
+	github.com/hyperledger/fabric-contract-api-go v1.2.2
 )
 
 require (
-	dltfm/pkg/models v0.0.0
 	github.com/go-openapi/jsonpointer v0.20.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/spec v0.20.9 // indirect
@@ -35,6 +34,5 @@ require (
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
 
 replace dltfm/pkg/models => ../pkg/models

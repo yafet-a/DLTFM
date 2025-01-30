@@ -7,6 +7,6 @@ export interface File {
     owner: string;
     metadata: string;
     version: number;
-    previousHash?: string;
+    previousID?: string;
     content: string;
   }

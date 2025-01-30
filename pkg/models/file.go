@@ -14,7 +14,7 @@ type File struct {
 	Owner           string `json:"owner"`
 	Metadata        string `json:"metadata"`
 	Version         int    `json:"version"`
-	PreviousHash    string `json:"previousHash,omitempty"`
+	PreviousID      string `json:"previousID,omitempty"`
 	Content         string `json:"content"`
 }
 
@@ -33,7 +33,8 @@ File Details:
 Metadata:
   Size:        %v bytes
   Type:        %v
-  Created:     %v`,
+  Created:     %v
+  Previous ID: %s`,
 		f.ID,
 		f.Name,
 		f.Owner,
@@ -42,7 +43,8 @@ Metadata:
 		f.Hash,
 		metadataMap["size"],
 		metadataMap["type"],
-		metadataMap["createdAt"])
+		metadataMap["createdAt"],
+		f.PreviousID)
 }
 
 func FormatFileList(files []File) string {
