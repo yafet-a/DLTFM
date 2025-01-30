@@ -29,11 +29,13 @@ const FilePreview = ({ file, previewUrl }: FilePreviewProps) => {
         <div className="flex-shrink-0">
           {file.type.startsWith('image/') && previewUrl ? (
             <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-100">
-              <Image
-                src={previewUrl}
-                alt={file.name}
-                className="w-full h-full object-cover"
-              />
+            <Image
+              src={previewUrl}
+              alt={file.name}
+              width={80}
+              height={80}
+              className="w-full h-full object-cover"
+            />
             </div>
           ) : (
             <div className="w-20 h-20 rounded-lg bg-gray-100 flex items-center justify-center">

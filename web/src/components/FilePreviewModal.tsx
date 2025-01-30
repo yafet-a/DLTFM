@@ -31,6 +31,8 @@ const FilePreviewModal = ({ file, onClose }: FilePreviewModalProps) => {
             <Image 
               src={`data:${metadata.type};base64,${file.content}`}
               alt={file.name}
+              width={900}
+              height={800}
               className="max-w-full max-h-[70vh] object-contain"
             />
           </div>
