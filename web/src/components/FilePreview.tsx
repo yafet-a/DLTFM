@@ -1,5 +1,6 @@
 import React from 'react';
 import { File as FileIcon, Image as ImageIcon, FileText, FileCode, FileArchive } from 'lucide-react';
+import Image from 'next/image';
 
 interface FilePreviewProps {
   file: File;
@@ -28,7 +29,7 @@ const FilePreview = ({ file, previewUrl }: FilePreviewProps) => {
         <div className="flex-shrink-0">
           {file.type.startsWith('image/') && previewUrl ? (
             <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-100">
-              <img
+              <Image
                 src={previewUrl}
                 alt={file.name}
                 className="w-full h-full object-cover"

@@ -87,7 +87,7 @@ export function OrgProvider({ children }: { children: React.ReactNode }) {
     }
 
     loadOrganizations();
-  }, [session]); // Remove currentOrg from dependencies to prevent loops
+  }, [session, currentOrg]);
 
   const value = {
     currentOrg,

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronDown, Upload, User } from 'lucide-react';
 import axios from 'axios';
 import type { File as BlockchainFile } from '@/types/file';
@@ -31,84 +31,9 @@ export default function Home() {
   const { currentOrg, loading: orgLoading } = useOrg();
   const [showUserMenu, setShowUserMenu] = useState(false);
 
-
-
-  useEffect(() => {
-    if (session && currentOrg && !orgLoading) {
-      // Initial load of files
-      loadFiles();
-      setIsConnected(true); // Initial connection state
-  
-      // Set up realtime subscription
-      const channel = supabase
-        .channel('files-changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'files'
-          },
-          (payload) => {
-            console.log('Realtime update received:', payload);
-            loadFiles(); // Reload files when any change happens
-          }
-        )
-        .subscribe((status) => {
-          console.log('Subscription status:', status);
-          
-          if (status === 'SUBSCRIBED') {
-            setIsConnected(true);
-          } else {
-            setIsConnected(false);
-          }
-        });
-  
-      return () => {
-        // Cleanup subscription on unmount
-        console.log('Cleaning up subscription');
-        supabase.removeChannel(channel);
-      };
-    } else {
-      setIsConnected(false);
-    }
-  }, [session, currentOrg, orgLoading]);
-
-  useEffect(() => {
-    // Cleanup preview URL when component unmounts or file changes
-    return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-      }
-    };
-  }, [previewUrl]);
-
-  // const checkConnection = async () => {
-  //   try {
-  //     await axios.get('http://localhost:8080/api/files', {
-  //       headers: {
-  //         Authorization: `Bearer ${session?.access_token}`,
-  //         'X-Organization-ID': currentOrg?.id,
-  //         'X-MSP-ID': currentOrg?.fabric_msp_id
-
-  //       }
-  //     });
-  //     setIsConnected(true);
-  //   } catch (err) {
-  //     setIsConnected(false);
-  //   }
-  // };
-
-  const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut();
-      window.location.reload(); // Refresh the page after logout
-    } catch (error) {
-      console.error('Error signing out:', error);
-    }
-  };
-
-  const loadFiles = async () => {
+  const loadFiles = useCallback(async () => {
+    if (!session || !currentOrg) return;
+    
     try {
       setLoading(true);
       const response = await axios.get<BlockchainFile[]>('http://localhost:8080/api/files', {
@@ -125,7 +50,49 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [session, currentOrg]);
+
+  useEffect(() => {
+    if (session && currentOrg && !orgLoading) {
+      loadFiles();
+      setIsConnected(true);
+    } else {
+      setIsConnected(false);
+    }
+  }, [session, currentOrg, orgLoading, loadFiles]);
+
+  useEffect(() => {
+    if (!session || !currentOrg) return;
+
+    const channel = supabase
+      .channel('files-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'files'
+        },
+        () => {
+          loadFiles();
+        }
+      )
+      .subscribe((status) => {
+        setIsConnected(status === 'SUBSCRIBED');
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session, currentOrg, loadFiles]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -136,12 +103,12 @@ export default function Home() {
       setDragActive(false);
     }
   };
-
+  
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-
+    
     const droppedFiles = Array.from(e.dataTransfer.files);
     if (droppedFiles.length > 0) {
       const file = droppedFiles[0];
@@ -153,6 +120,15 @@ export default function Home() {
       } else {
         setPreviewUrl(null);
       }
+    }
+  };
+  
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      window.location.reload(); // Refresh the page after logout
+    } catch (error) {
+      console.error('Error signing out:', error);
     }
   };
 
