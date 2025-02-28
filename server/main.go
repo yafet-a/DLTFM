@@ -180,12 +180,16 @@ func main() {
 			fmt.Printf("Upload request from user: %s, organization: %s (MSP: %s)\n", userID, org.Name, mspID)
 
 			var request struct {
-				ID         string `json:"id"`
-				Name       string `json:"name"`
-				Content    string `json:"content"`
-				Owner      string `json:"owner"`
-				Metadata   string `json:"metadata"`
-				PreviousID string `json:"previousID"`
+				ID                string `json:"id"`
+				Name              string `json:"name"`
+				Content           string `json:"content"`
+				Owner             string `json:"owner"`
+				Metadata          string `json:"metadata"`
+				PreviousID        string `json:"previousID"`
+				EndorsementConfig struct {
+					PolicyType   string   `json:"policyType"`
+					RequiredOrgs []string `json:"requiredOrgs"`
+				} `json:"endorsementConfig"`
 			}
 
 			if err := c.BindJSON(&request); err != nil {
@@ -205,16 +209,26 @@ func main() {
 			network := gw.GetNetwork("mychannel")
 			contract := network.GetContract("chaincode")
 
-			fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s, org=%s, previousID=%s\n",
-				request.ID, request.Name, org.Name, request.PreviousID)
+			// Convert endorsement config to JSON string
+			endorsementConfigJSON, err := json.Marshal(request.EndorsementConfig)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("failed to marshal endorsement config: %v", err),
+				})
+				return
+			}
+
+			fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s, org=%s, previousID=%s, endorsementConfig=%s\n",
+				request.ID, request.Name, org.Name, request.PreviousID, string(endorsementConfigJSON))
 
 			_, err = contract.SubmitTransaction("RegisterFile",
-				request.ID, // ID should be provided by the client
+				request.ID,
 				request.Name,
 				request.Content,
 				org.Name,
 				request.Metadata,
 				request.PreviousID,
+				string(endorsementConfigJSON),
 			)
 
 			if err != nil {
@@ -228,6 +242,42 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{
 				"message": "File successfully registered",
 				"id":      request.ID,
+			})
+		})
+
+		api.POST("/files/:id/approve", func(c *gin.Context) {
+			userID := c.GetString("userID")
+			mspID := c.GetString("mspID")
+			org := c.MustGet("organization").(*supabase.Organization)
+			fileID := c.Param("id")
+
+			fmt.Printf("Approval request for file %s from user: %s, organization: %s (MSP: %s)\n",
+				fileID, userID, org.Name, mspID)
+
+			// Get the appropriate gateway for this organization
+			gw, err := gatewayManager.GetGateway(mspID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("failed to get gateway: %v", err),
+				})
+				return
+			}
+
+			network := gw.GetNetwork("mychannel")
+			contract := network.GetContract("chaincode")
+
+			_, err = contract.SubmitTransaction("ApproveFile", fileID)
+			if err != nil {
+				log.Printf("ERROR: Failed to approve file: %v\n", err)
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("failed to approve file: %v", err),
+				})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"message": "File successfully approved",
+				"id":      fileID,
 			})
 		})
 
