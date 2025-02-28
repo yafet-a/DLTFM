@@ -9,4 +9,8 @@ export interface File {
     version: number;
     previousID?: string;
     content: string;
+    status: string;               // "PENDING" or "APPROVED"
+    requiredOrgs: string[];      // List of required MSP IDs
+    currentApprovals: string[];  // List of MSP IDs that have approved
+    endorsementType: string;     // "ANY_ORG", "ALL_ORGS", "SPECIFIC_ORGS"
   }
