@@ -168,24 +168,38 @@ export function EndorsementWizard({ onSubmit, onCancel }: EndorsementWizardProps
                     Cancel
                 </Button>
                 <Button
-                    onClick={() => {
-                        let finalRequiredOrgs: string[] = [];
-                        switch (config.policyType) {
-                            case "ALL_ORGS":
-                                finalRequiredOrgs = [currentOrg?.fabric_msp_id || "Org1MSP", "Org2MSP"];
-                                break;
-                            case "ANY_ORG":
-                                finalRequiredOrgs = [currentOrg?.fabric_msp_id || "Org1MSP"];
-                                break;
-                            case "SPECIFIC_ORGS":
-                                finalRequiredOrgs = [currentOrg?.fabric_msp_id || "Org1MSP", ...config.requiredOrgs];
-                                break;
-                        }
-                        onSubmit({
-                            policyType: config.policyType,
-                            requiredOrgs: finalRequiredOrgs,
-                        });
-                    }}
+                // When submitting the form
+                onClick={() => {
+                    let finalPolicy = config.policyType;
+                    let finalRequiredOrgs: string[] = [];
+                    
+                    // Get current org MSP ID
+                    const currentOrgMSP = currentOrg?.fabric_msp_id || "Org1MSP";
+                    
+                    switch (config.policyType) {
+                        case "ALL_ORGS":
+                            finalRequiredOrgs = [currentOrgMSP, "Org2MSP"];
+                            break;
+                        case "ANY_ORG":
+                            finalRequiredOrgs = [currentOrgMSP, "Org2MSP"]; // Include all orgs as "eligible"
+                            break;
+                        case "SPECIFIC_ORGS":
+                            // If only current org is selected, switch to ANY_ORG
+                            if (config.requiredOrgs.length === 0) {
+                                finalPolicy = "ANY_ORG";
+                                finalRequiredOrgs = [currentOrgMSP];
+                                // You could show a toast notification here explaining the switch
+                            } else {
+                                finalRequiredOrgs = [currentOrgMSP, ...config.requiredOrgs];
+                            }
+                            break;
+                    }
+                    
+                    onSubmit({
+                        policyType: finalPolicy,
+                        requiredOrgs: finalRequiredOrgs,
+                    });
+                }}
                 >
                     Configure Endorsement
                 </Button>

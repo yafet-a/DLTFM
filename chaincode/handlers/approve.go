@@ -51,5 +51,17 @@ func ApproveFile(ctx contractapi.TransactionContextInterface, id string) error {
 		return fmt.Errorf("failed to marshal updated file: %v", err)
 	}
 
-	return ctx.GetStub().PutState(id, updatedFileJSON)
+	err = ctx.GetStub().PutState(id, updatedFileJSON)
+	if err != nil {
+		return fmt.Errorf("failed to update file state: %v", err)
+	}
+
+	// Create audit log entry
+	details := fmt.Sprintf("Organization %s approved file %s", mspID, file.Name)
+	if err := CreateAuditLog(ctx, id, "APPROVE", details); err != nil {
+		// Log the error but don't fail the transaction
+		fmt.Printf("WARNING: Failed to create audit log: %v\n", err)
+	}
+
+	return nil
 }

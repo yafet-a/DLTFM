@@ -71,11 +71,12 @@ const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
 
   const renderDropdown = (file: BlockchainFile, isBottom: boolean) => (
     <div
-      className="fixed z-50 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-gray-100 focus:outline-none"
+      className="fixed z-50 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-gray-100 focus:outline-none"
       style={{
         position: 'absolute',
-        [isBottom ? 'bottom' : 'top']: '100%',
+        bottom: '100%',
         right: 0,
+        zIndex: 100
       }}
       ref={dropdownRef}
     >
@@ -83,7 +84,7 @@ const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
         {/* Only show Approve button if file is pending and not already approved by current org */}
         {file.status === "PENDING" && currentOrg && !file.currentApprovals.includes(currentOrg.fabric_msp_id) && (
           <button
-            className="group flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 w-full"  // Add this className to match others
+            className="group flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 w-full"
             onClick={async () => {
               try {
                 await onApproveFile(file.id);

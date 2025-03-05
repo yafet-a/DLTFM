@@ -49,6 +49,10 @@ func (s *SmartContract) GetFileByHash(ctx contractapi.TransactionContextInterfac
 	return handlers.GetFileByHash(ctx, hash)
 }
 
+func (s *SmartContract) GetFileAuditLogs(ctx contractapi.TransactionContextInterface, fileID string) (string, error) {
+	return handlers.GetFileAuditLogs(ctx, fileID)
+}
+
 func main() {
 	chaincode, err := contractapi.NewChaincode(new(SmartContract))
 	if err != nil {

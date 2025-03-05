@@ -219,7 +219,7 @@ deploy_chaincode() {
             --sequence $SEQUENCE \
             --tls \
             --cafile $FABRIC_SAMPLES_DIR/test-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem \
-            --signature-policy "AND('Org1MSP.member','Org2MSP.member')"
+            --signature-policy "OR('Org1MSP.member','Org2MSP.member')"
 
         check_status "Chaincode approval for Org$org" || return 1
     done
@@ -245,7 +245,7 @@ deploy_chaincode() {
         --tlsRootCertFiles $FABRIC_SAMPLES_DIR/test-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt \
         --peerAddresses localhost:9051 \
         --tlsRootCertFiles $FABRIC_SAMPLES_DIR/test-network/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt \
-        --signature-policy "AND('Org1MSP.member','Org2MSP.member')"
+        --signature-policy "OR('Org1MSP.member','Org2MSP.member')"
 
     check_status "Chaincode commitment" || return 1
 
@@ -263,8 +263,8 @@ package_chaincode() {
     # Navigate to chaincode directory
     cd "$SCRIPT_DIR/../chaincode" || return 1
     
-    # Ensure dependencies are vendored
-    go mod vendor
+    # Ensure dependencies are up to date
+    go mod tidy
     
     # Package using peer lifecycle command
     peer lifecycle chaincode package chaincode.tar.gz \
@@ -274,6 +274,8 @@ package_chaincode() {
         
     if [ $? -eq 0 ]; then
         log "success" "Created new chaincode package"
+        PACKAGE_SIZE=$(du -h chaincode.tar.gz | cut -f1)
+        log "info" "Package size: $PACKAGE_SIZE"
         return 0
     else
         log "error" "Failed to create chaincode package"

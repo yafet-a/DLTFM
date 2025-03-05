@@ -171,6 +171,35 @@ func main() {
 			c.JSON(http.StatusOK, json.RawMessage(result))
 		})
 
+		// Getting audit
+		api.GET("/files/:id/audit", func(c *gin.Context) {
+			userID := c.GetString("userID")
+			mspID := c.GetString("mspID")
+			org := c.MustGet("organization").(*supabase.Organization)
+
+			fileID := c.Param("id")
+
+			fmt.Printf("Audit log request for file: %s, user: %s, org: %s\n", fileID, userID, org.Name)
+
+			// Get the appropriate gateway for this organization
+			gw, err := gatewayManager.GetGateway(mspID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get gateway: %v", err)})
+				return
+			}
+
+			network := gw.GetNetwork("mychannel")
+			contract := network.GetContract("chaincode")
+
+			result, err := contract.EvaluateTransaction("GetFileAuditLogs", fileID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to fetch audit logs: %v", err)})
+				return
+			}
+
+			c.JSON(http.StatusOK, json.RawMessage(result))
+		})
+
 		// Register a new file
 		api.POST("/files", func(c *gin.Context) {
 			userID := c.GetString("userID")

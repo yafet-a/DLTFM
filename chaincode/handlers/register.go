@@ -67,11 +67,8 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 	}
 
 	// Initialize approvals array
-	initialApprovals := []string{}
-	if config.PolicyType == "ANY_ORG" {
-		// For ANY_ORG, the submitting org's approval is immediate
-		initialApprovals = append(initialApprovals, mspID)
-	}
+	// status := "PENDING"
+	initialApprovals := []string{mspID}
 
 	// Store new file entry
 	file := models.File{
@@ -108,6 +105,13 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 	err = ctx.GetStub().PutState(id, fileJSON)
 	if err != nil {
 		return fmt.Errorf("failed to save file to world state: %v", err)
+	}
+
+	// Audit the transaction
+	details := fmt.Sprintf("File %s registered by %s with endorsement type %s", name, owner, config.PolicyType)
+	if err := CreateAuditLog(ctx, id, "REGISTER", details); err != nil {
+		// Log the error but don't fail the transaction
+		fmt.Printf("WARNING: Failed to create audit log: %v\n", err)
 	}
 
 	return nil
