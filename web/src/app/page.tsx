@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronDown, Upload, User } from 'lucide-react';
+import { Check, ChevronDown, ChevronsUpDown, Upload, User } from 'lucide-react';
 import axios from 'axios';
 import type { File as BlockchainFile } from '@/types/file';
 import FilePreview from '@/components/FilePreview';
@@ -14,6 +14,18 @@ import OrganizationSelector from '@/components/OrgSelector';
 import { supabase } from '@/lib/supabase';
 import OrganizationOnboarding from '@/components/OrganizationOnboarding';
 import { v4 as uuidv4 } from 'uuid';
+import { EndorsementWizard } from '@/components/EndorsementWizard';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+
 
 export default function Home() {
   const { session, user } = useAuth();
@@ -30,6 +42,11 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { currentOrg, loading: orgLoading } = useOrg();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [openVersionCombo, setOpenVersionCombo] = useState(false);
+//   const [endorsementConfig, setEndorsementConfig] = useState({
+//     policyType: "ALL_ORGS",
+//     requiredOrgs: [] as string[]
+// });
 
   const loadFiles = useCallback(async () => {
     if (!session || !currentOrg) return;
@@ -150,55 +167,6 @@ export default function Home() {
     }
   };
 
-  const handleFileUpload = async (file: globalThis.File, previousID?: string) => {
-    try {
-      setUploading(true);
-      setError(null);
-
-      const content = await readFileContent(file);
-      
-      const metadata = {
-        size: file.size,
-        type: file.type || 'application/octet-stream',
-        createdAt: new Date().toISOString(),
-        encoding: 'base64'
-      };
-
-      const payload = {
-        id: uuidv4(),
-        name: file.name,
-        content: content,
-        owner: user?.email || "unknown",
-        metadata: JSON.stringify(metadata),
-        previousID: previousID || "", // Send previousID if selected, else empty string
-      };
-
-      // console.log("DEBUG: Sending payload to backend", payload);
-
-      await axios.post('http://localhost:8080/api/files', payload, {
-        headers: {
-          Authorization: `Bearer ${session?.access_token}`,
-          'X-Organization-ID': currentOrg?.id,
-          'X-MSP-ID': currentOrg?.fabric_msp_id
-        }
-      });
-      
-      await loadFiles();
-      
-      // Clear selection and preview
-      setSelectedFile(null);
-      setPreviewUrl(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-      
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to upload file');
-    } finally {
-      setUploading(false);
-    }
-  };
-
   const readFileContent = (file: globalThis.File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -223,6 +191,23 @@ export default function Home() {
 
   const handleViewHistory = (file: BlockchainFile) => {
     setSelectedVersionFile(file);
+  };
+
+  const handleApproveFile = async (fileId: string) => {
+    try {
+      await axios.post(`http://localhost:8080/api/files/${fileId}/approve`, {}, {
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+          'X-Organization-ID': currentOrg?.id,
+          'X-MSP-ID': currentOrg?.fabric_msp_id
+        }
+      });
+      
+      // Refresh files list after approval
+      await loadFiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to approve file');
+    }
   };
 
   const getFileVersions = (file: BlockchainFile) => {
@@ -309,7 +294,6 @@ export default function Home() {
           onDrop={handleDrop}
         >
           <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileSelect} />
-
           <Upload className="mx-auto h-12 w-12 text-gray-400" />
           <p className="mt-2 text-sm text-gray-600">
             Drag and drop files here, or{" "}
@@ -329,48 +313,130 @@ export default function Home() {
         </div>
 
         {selectedFile && (
-          <div className="mb-6 bg-white shadow rounded-lg p-6">
-            <h4 className="text-lg font-medium text-gray-900 mb-4">Preview:</h4>
-            <FilePreview file={selectedFile} previewUrl={previewUrl} />
+          <div className="mb-6 space-y-6">
+            {/* File Preview Card */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h4 className="text-lg font-medium text-gray-900 mb-4">Preview:</h4>
+              <FilePreview file={selectedFile} previewUrl={previewUrl} />
+              
+              <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Versioning:
+              </label>
+              <Popover open={openVersionCombo} onOpenChange={setOpenVersionCombo}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={openVersionCombo}
+                    className="w-full justify-between"
+                  >
+                    {selectedPreviousFile
+                      ? `Update ${files.find((f) => f.id === selectedPreviousFile)?.name} (v${files.find((f) => f.id === selectedPreviousFile)?.version})`
+                      : "New File"}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-full p-0">
+                  <Command>
+                    <CommandInput placeholder="Search file..." />
+                    <CommandList>
+                      <CommandEmpty>No matching file.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          onSelect={() => {
+                            setSelectedPreviousFile("");
+                            setOpenVersionCombo(false);
+                          }}
+                          className="cursor-pointer"
+                        >
+                          <Check
+                            className={`mr-2 h-4 w-4 ${
+                              selectedPreviousFile === "" ? "opacity-100" : "opacity-0"
+                            }`}
+                          />
+                          New File
+                        </CommandItem>
+                        {files.map((file) => (
+                          <CommandItem
+                            key={file.id}
+                            onSelect={() => {
+                              setSelectedPreviousFile(file.id);
+                              setOpenVersionCombo(false);
+                            }}
+                            className="cursor-pointer"
+                          >
+                            <Check
+                              className={`mr-2 h-4 w-4 ${
+                                selectedPreviousFile === file.id ? "opacity-100" : "opacity-0"
+                              }`}
+                            />
+                            Update {file.name} (v{file.version})
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
             
-            {/* Add version selector here */}
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700">Versioning:</label>
-              <select
-                className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"
-                onChange={(e) => setSelectedPreviousFile(e.target.value || undefined)}
-                value={selectedPreviousFile || ""}
-              >
-                <option value="">New File</option>
-                {files.map((file) => (
-                  <option key={file.id} value={file.id}>
-                    Update {file.name} (v{file.version})
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Endorsement Wizard */}
+            <EndorsementWizard
+              onSubmit={async (endorsementConfig) => {
+                try {
+                  setUploading(true);
+                  const content = await readFileContent(selectedFile);
+                  
+                  const metadata = {
+                    size: selectedFile.size,
+                    type: selectedFile.type || 'application/octet-stream',
+                    createdAt: new Date().toISOString(),
+                    encoding: 'base64'
+                  };
 
-            <div className="mt-4 flex justify-end space-x-3">
-              <button
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-700 focus:outline-none"
-                onClick={() => {
-                  setSelectedFile(null)
-                  setPreviewUrl(null)
+                  const payload = {
+                    id: uuidv4(),
+                    name: selectedFile.name,
+                    content: content,
+                    owner: user?.email || "unknown",
+                    metadata: JSON.stringify(metadata),
+                    previousID: selectedPreviousFile || "",
+                    endorsementConfig: endorsementConfig
+                  };
+
+                  await axios.post('http://localhost:8080/api/files', payload, {
+                    headers: {
+                      Authorization: `Bearer ${session?.access_token}`,
+                      'X-Organization-ID': currentOrg?.id,
+                      'X-MSP-ID': currentOrg?.fabric_msp_id
+                    }
+                  });
+                  
+                  await loadFiles();
+                  
+                  // Clear selection and preview
+                  setSelectedFile(null);
+                  setPreviewUrl(null);
                   if (fileInputRef.current) {
-                    fileInputRef.current.value = ""
+                    fileInputRef.current.value = '';
                   }
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="px-4 py-2 text-sm text-white bg-indigo-600 hover:bg-indigo-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition duration-150 ease-in-out"
-                onClick={() => selectedFile && handleFileUpload(selectedFile, selectedPreviousFile)}
-                disabled={uploading}
-              >
-                Upload File
-              </button>
-            </div>
+                  
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Failed to upload file');
+                } finally {
+                  setUploading(false);
+                }
+              }}
+              onCancel={() => {
+                setSelectedFile(null);
+                setPreviewUrl(null);
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = "";
+                }
+              }}
+            />
           </div>
         )}
 
@@ -385,7 +451,7 @@ export default function Home() {
               <p className="mt-2">Loading files...</p>
             </div>
           ) : (
-            <FileTable files={files} onViewHistory={handleViewHistory} />
+            <FileTable files={files} onViewHistory={handleViewHistory} onApproveFile={handleApproveFile} />
           )}
         </div>
       </main>
@@ -399,5 +465,5 @@ export default function Home() {
         />
       )}
     </div>
-  )
+  );
 }

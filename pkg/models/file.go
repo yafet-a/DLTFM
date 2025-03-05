@@ -6,16 +6,20 @@ import (
 )
 
 type File struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Hash            string `json:"hash"`
-	StorageLocation string `json:"storageLocation"`
-	Timestamp       string `json:"timestamp"`
-	Owner           string `json:"owner"`
-	Metadata        string `json:"metadata"`
-	Version         int    `json:"version"`
-	PreviousID      string `json:"previousID,omitempty"`
-	Content         string `json:"content"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Hash             string   `json:"hash"`
+	StorageLocation  string   `json:"storageLocation"`
+	Timestamp        string   `json:"timestamp"`
+	Owner            string   `json:"owner"`
+	Metadata         string   `json:"metadata"`
+	Version          int      `json:"version"`
+	PreviousID       string   `json:"previousID,omitempty"`
+	Content          string   `json:"content"`
+	Status           string   `json:"status"`
+	RequiredOrgs     []string `json:"requiredOrgs"`
+	CurrentApprovals []string `json:"currentApprovals"`
+	EndorsementType  string   `json:"endorsementType"`
 }
 
 func (f *File) FormatCLI() string {
@@ -30,21 +34,30 @@ File Details:
   Created:     %s
   Version:     %d
   Hash:        %s
+  Status:      %s
 Metadata:
   Size:        %v bytes
   Type:        %v
   Created:     %v
-  Previous ID: %s`,
+  Previous ID: %s
+Endorsement:
+  Type:        %s
+  Required:    %v
+  Approved By: %v`,
 		f.ID,
 		f.Name,
 		f.Owner,
 		f.Timestamp,
 		f.Version,
 		f.Hash,
+		f.Status,
 		metadataMap["size"],
 		metadataMap["type"],
 		metadataMap["createdAt"],
-		f.PreviousID)
+		f.PreviousID,
+		f.EndorsementType,
+		f.RequiredOrgs,
+		f.CurrentApprovals)
 }
 
 func FormatFileList(files []File) string {

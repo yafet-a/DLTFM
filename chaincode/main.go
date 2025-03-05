@@ -11,8 +11,30 @@ type SmartContract struct {
 	contractapi.Contract
 }
 
-func (s *SmartContract) RegisterFile(ctx contractapi.TransactionContextInterface, id string, name string, content string, owner string, metadata string, previousID string) error {
-	return handlers.RegisterFile(ctx, id, name, content, owner, metadata, previousID)
+func (s *SmartContract) RegisterFile(
+	ctx contractapi.TransactionContextInterface,
+	id string,
+	name string,
+	content string,
+	owner string,
+	metadata string,
+	previousID string,
+	endorsementConfig string,
+) error {
+	return handlers.RegisterFile(
+		ctx,
+		id,
+		name,
+		content,
+		owner,
+		metadata,
+		previousID,
+		endorsementConfig,
+	)
+}
+
+func (s *SmartContract) ApproveFile(ctx contractapi.TransactionContextInterface, id string) error {
+	return handlers.ApproveFile(ctx, id)
 }
 
 func (s *SmartContract) QueryAllFiles(ctx contractapi.TransactionContextInterface) (string, error) {
@@ -25,6 +47,10 @@ func (s *SmartContract) GetFileByID(ctx contractapi.TransactionContextInterface,
 
 func (s *SmartContract) GetFileByHash(ctx contractapi.TransactionContextInterface, hash string) (string, error) {
 	return handlers.GetFileByHash(ctx, hash)
+}
+
+func (s *SmartContract) GetFileAuditLogs(ctx contractapi.TransactionContextInterface, fileID string) (string, error) {
+	return handlers.GetFileAuditLogs(ctx, fileID)
 }
 
 func main() {

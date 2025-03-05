@@ -11,8 +11,24 @@ import (
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
-func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name string, content string, owner string, metadata string, previousID string) error {
+type EndorsementConfig struct {
+	RequiredOrgs []string `json:"requiredOrgs"`
+	PolicyType   string   `json:"policyType"`
+}
+
+func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name string, content string, owner string, metadata string, previousID string, endorsementConfig string) error {
 	fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s\n", id, name)
+
+	// Parse endorsement config
+	var config EndorsementConfig
+	if err := json.Unmarshal([]byte(endorsementConfig), &config); err != nil {
+		return fmt.Errorf("invalid endorsement config: %v", err)
+	}
+
+	// Validate policy type
+	if config.PolicyType != "ANY_ORG" && config.PolicyType != "ALL_ORGS" && config.PolicyType != "SPECIFIC_ORGS" {
+		return fmt.Errorf("invalid policy type: %s", config.PolicyType)
+	}
 
 	// Compute hash for integrity verification
 	hash := utils.ComputeHash(content)
@@ -44,19 +60,39 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 		fmt.Printf("DEBUG: Creating new file (not a versioned update)\n")
 	}
 
+	// Get submitting org's MSP ID to add to initial approvals for ANY_ORG policy
+	mspID, err := ctx.GetClientIdentity().GetMSPID()
+	if err != nil {
+		return fmt.Errorf("failed to get MSP ID: %v", err)
+	}
+
+	// Initialize approvals array
+	// status := "PENDING"
+	initialApprovals := []string{mspID}
+
 	// Store new file entry
 	file := models.File{
-		ID:         id,
-		Name:       name,
-		Hash:       hash,
-		Timestamp:  timestamp,
-		Owner:      owner,
-		Metadata:   metadata,
-		Version:    newVersion,
-		PreviousID: previousID,
-		Content:    content,
+		ID:               id,
+		Name:             name,
+		Hash:             hash,
+		Timestamp:        timestamp,
+		Owner:            owner,
+		Metadata:         metadata,
+		Version:          newVersion,
+		PreviousID:       previousID,
+		Content:          content,
+		Status:           "PENDING",
+		RequiredOrgs:     config.RequiredOrgs,
+		CurrentApprovals: initialApprovals,
+		EndorsementType:  config.PolicyType,
 	}
-	fmt.Printf("DEBUG: Registering file - ID: %s, PreviousID: %s\n", file.ID, file.PreviousID) // Debugging line
+
+	// Set status to APPROVED if using ANY_ORG and submitter is in RequiredOrgs
+	if config.PolicyType == "ANY_ORG" && contains(config.RequiredOrgs, mspID) {
+		file.Status = "APPROVED"
+	}
+
+	fmt.Printf("DEBUG: Registering file - ID: %s, PreviousID: %s\n", file.ID, file.PreviousID)
 
 	fileJSON, err := json.Marshal(file)
 	if err != nil {
@@ -71,5 +107,22 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 		return fmt.Errorf("failed to save file to world state: %v", err)
 	}
 
+	// Audit the transaction
+	details := fmt.Sprintf("File %s registered by %s with endorsement type %s", name, owner, config.PolicyType)
+	if err := CreateAuditLog(ctx, id, "REGISTER", details); err != nil {
+		// Log the error but don't fail the transaction
+		fmt.Printf("WARNING: Failed to create audit log: %v\n", err)
+	}
+
 	return nil
+}
+
+// Helper function to check if a string is in a slice
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }

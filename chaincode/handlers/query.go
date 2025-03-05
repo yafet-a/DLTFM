@@ -120,3 +120,40 @@ func GetFileByHash(ctx contractapi.TransactionContextInterface, hash string) (st
 
 	return "", nil
 }
+
+func GetFileAuditLogs(ctx contractapi.TransactionContextInterface, fileID string) (string, error) {
+	// Create a partial composite key to find all audit logs for this file
+	iterator, err := ctx.GetStub().GetStateByPartialCompositeKey("audit", []string{fileID})
+	if err != nil {
+		return "", fmt.Errorf("failed to query audit logs: %v", err)
+	}
+	defer iterator.Close()
+
+	var logs []interface{}
+	for iterator.HasNext() {
+		response, err := iterator.Next()
+		if err != nil {
+			return "", fmt.Errorf("failed to iterate audit logs: %v", err)
+		}
+
+		var log interface{}
+		err = json.Unmarshal(response.Value, &log)
+		if err != nil {
+			fmt.Printf("ERROR: Failed to unmarshal audit log: %v\n", err)
+			continue // Skip invalid entries
+		}
+
+		logs = append(logs, log)
+	}
+
+	if len(logs) == 0 {
+		return "[]", nil // Return empty JSON array
+	}
+
+	logsJSON, err := json.Marshal(logs)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal audit logs: %v", err)
+	}
+
+	return string(logsJSON), nil
+}

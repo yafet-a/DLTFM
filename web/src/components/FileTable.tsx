@@ -1,17 +1,20 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { File as FileIcon, ChevronDown, History, Eye, Share, ChevronRight } from 'lucide-react';
+import { File as FileIcon, ChevronDown, History, Eye, Share, ChevronRight, Check } from 'lucide-react';
 import type { File as BlockchainFile } from '@/types/file';
 import FilePreviewModal from './FilePreviewModal';
+import { useOrg } from '@/contexts/OrgContext';
 interface FileTableProps {
   files: BlockchainFile[];
   onViewHistory: (file: BlockchainFile) => void;
+  onApproveFile: (fileId: string) => Promise<void>;
 }
 
-const FileTable = ({ files, onViewHistory }: FileTableProps) => {
+const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [previewFile, setPreviewFile] = useState<BlockchainFile | null>(null);
+  const { currentOrg } = useOrg();
 
   //Group files by previousID for proper version tracking
   const groupFilesByPreviousID = useCallback((files: BlockchainFile[]) => {
@@ -68,15 +71,33 @@ const FileTable = ({ files, onViewHistory }: FileTableProps) => {
 
   const renderDropdown = (file: BlockchainFile, isBottom: boolean) => (
     <div
-      className="fixed z-50 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-gray-100 focus:outline-none"
+      className="fixed z-50 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-gray-100 focus:outline-none"
       style={{
         position: 'absolute',
-        [isBottom ? 'bottom' : 'top']: '100%',
+        bottom: '100%',
         right: 0,
+        zIndex: 100
       }}
       ref={dropdownRef}
     >
       <div className="py-1">
+        {/* Only show Approve button if file is pending and not already approved by current org */}
+        {file.status === "PENDING" && currentOrg && !file.currentApprovals.includes(currentOrg.fabric_msp_id) && (
+          <button
+            className="group flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 w-full"
+            onClick={async () => {
+              try {
+                await onApproveFile(file.id);
+                setOpenDropdown(null);
+              } catch (error) {
+                console.error("Failed to approve file:", error);
+              }
+            }}
+          >
+            <Check className="mr-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" />
+            Approve File
+          </button>
+        )}
         <button
           className="group flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 w-full"
           onClick={() => onViewHistory(file)}
@@ -148,9 +169,25 @@ const FileTable = ({ files, onViewHistory }: FileTableProps) => {
             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
               {new Date(file.timestamp).toLocaleString()}
             </td>
-            <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">
+            {/* <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">
               <div className={`${index === 0 ? '' : 'opacity-60'}`}>
                 {file.hash.substring(0, 8)}...
+              </div>
+            </td> */}
+            <td className="px-6 py-4 whitespace-nowrap">
+              <div className="flex items-center space-x-2">
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  file.status === 'APPROVED' 
+                    ? 'bg-green-100 text-green-800' 
+                    : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {file.status}
+                </span>
+                {file.status === 'PENDING' && (
+                  <span className="text-xs text-gray-500">
+                    {file.currentApprovals.length}/{file.requiredOrgs.length} approvals
+                  </span>
+                )}
               </div>
             </td>
             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 relative">
@@ -182,7 +219,8 @@ const FileTable = ({ files, onViewHistory }: FileTableProps) => {
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Owner</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hash</th>
+            {/* <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hash</th> */}
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
           </tr>
         </thead>
