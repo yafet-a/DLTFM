@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"dltfm/chaincode/utils"
 	"dltfm/pkg/models"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
@@ -16,7 +15,7 @@ type EndorsementConfig struct {
 	PolicyType   string   `json:"policyType"`
 }
 
-func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name string, content string, owner string, metadata string, previousID string, endorsementConfig string) error {
+func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name string, ipfsCID string, owner string, metadata string, previousID string, endorsementConfig string) error {
 	fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s\n", id, name)
 
 	// Parse endorsement config
@@ -30,9 +29,10 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 		return fmt.Errorf("invalid policy type: %s", config.PolicyType)
 	}
 
-	// Compute hash for integrity verification
-	hash := utils.ComputeHash(content)
-	fmt.Printf("DEBUG: Computed hash: %s\n", hash)
+	// Note: We no longer compute the hash of the content here as it's not available.
+	// Instead, we'll store the IPFS CID which already serves as a content hash.
+	hash := ipfsCID // IPFS CID is already a content-addressed hash
+	fmt.Printf("DEBUG: Using IPFS CID as hash: %s\n", hash)
 
 	var newVersion int
 	timestamp := time.Now().Format(time.RFC3339)
@@ -60,14 +60,13 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 		fmt.Printf("DEBUG: Creating new file (not a versioned update)\n")
 	}
 
-	// Get submitting org's MSP ID to add to initial approvals for ANY_ORG policy
+	// Get submitting org's MSP ID
 	mspID, err := ctx.GetClientIdentity().GetMSPID()
 	if err != nil {
 		return fmt.Errorf("failed to get MSP ID: %v", err)
 	}
 
 	// Initialize approvals array
-	// status := "PENDING"
 	initialApprovals := []string{mspID}
 
 	// Store new file entry
@@ -80,7 +79,7 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 		Metadata:         metadata,
 		Version:          newVersion,
 		PreviousID:       previousID,
-		Content:          content,
+		IPFSLocation:     ipfsCID, // Store IPFS CID instead of content
 		Status:           "PENDING",
 		RequiredOrgs:     config.RequiredOrgs,
 		CurrentApprovals: initialApprovals,
