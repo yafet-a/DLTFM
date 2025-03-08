@@ -1,7 +1,10 @@
-import React from 'react';
-import { X, FileIcon, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, FileIcon, AlertCircle, Download, ExternalLink } from 'lucide-react';
 import type { File as BlockchainFile } from '@/types/file';
 import Image from 'next/image';
+import axios from 'axios';
+import { useAuth } from '@/contexts/AuthContext';
+import { useOrg } from '@/contexts/OrgContext';
 
 interface FilePreviewModalProps {
   file: BlockchainFile;
@@ -9,27 +12,153 @@ interface FilePreviewModalProps {
 }
 
 const FilePreviewModal = ({ file, onClose }: FilePreviewModalProps) => {
-  const metadata = JSON.parse(file.metadata);
-  const isImage = metadata.type.startsWith('image/');
-  const isText = metadata.type.includes('text') || metadata.type.includes('json');
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { session } = useAuth();
+  const { currentOrg } = useOrg();
+  
+  console.log("File details:", {
+    id: file.id,
+    name: file.name,
+    ipfsLocation: file.ipfsLocation,
+    hash: file.hash
+  });
+  
+  // Parse file metadata
+  let metadata;
+  try {
+    metadata = JSON.parse(file.metadata);
+    console.log("Parsed metadata:", metadata);
+  } catch (e) {
+    console.error("Error parsing metadata:", e);
+    metadata = { type: "application/octet-stream", size: 0 };
+  }
+  
+  const isImage = metadata.type?.startsWith('image/');
+  const isText = metadata.type?.includes('text') || metadata.type?.includes('json');
   const isPDF = metadata.type === 'application/pdf';
 
-  const getContent = () => {
-    try {
-      if (!file.content) {
-        return (
-          <div className="flex flex-col items-center justify-center text-gray-500">
-            <AlertCircle size={48} className="mb-2" />
-            <p>Content not available for preview</p>
-          </div>
-        );
-      }
+  // Direct IPFS gateway URL (use this to bypass your server if needed)
+  const ipfsGatewayUrl = `http://localhost:8088/ipfs/${file.ipfsLocation}`;
+  
+  // Server proxy URL
+  const serverProxyUrl = `http://localhost:8080/api/files/${file.id}/content`;
 
+  useEffect(() => {
+    // Only fetch if we have an IPFS location
+    if (file.ipfsLocation) {
+      console.log("Fetching content for IPFS CID:", file.ipfsLocation);
+      setLoading(true);
+      
+      // Try the direct IPFS gateway first (for debugging)
+      console.log("Trying direct IPFS gateway:", ipfsGatewayUrl);
+      
+      // Determine the appropriate response type based on file type
+      const responseType = isText ? 'text' : 'blob';
+      
+      // Try our server proxy which should handle the IPFS retrieval
+      axios.get(serverProxyUrl, {
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+          'X-Organization-ID': currentOrg?.id,
+          'X-MSP-ID': currentOrg?.fabric_msp_id
+        },
+        responseType: responseType,
+        timeout: 10000 // 10 second timeout
+      })
+      .then(response => {
+        console.log("Content retrieved successfully", {
+          contentType: response.headers['content-type'],
+          contentLength: response.headers['content-length'],
+          status: response.status
+        });
+        
+        if (isText) {
+          // For text files, just set the content directly
+          setFileContent(response.data);
+        } else {
+          // For binary data, create a blob URL
+          const blob = new Blob([response.data], { type: metadata.type });
+          const url = URL.createObjectURL(blob);
+          setFileContent(url);
+        }
+        setError(null);
+      })
+      .catch(err => {
+        console.error("Failed to fetch content via server proxy:", err);
+        
+        // If server proxy fails, try direct IPFS gateway as fallback
+        if (isImage || isPDF) {
+          console.log("Trying direct IPFS gateway as fallback");
+          setFileContent(ipfsGatewayUrl);
+        } else {
+          setError(`Error loading content: ${err.message}`);
+        }
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+    }
+  }, [file.id, file.ipfsLocation, isText, isPDF, isImage, ipfsGatewayUrl, serverProxyUrl, metadata?.type, session?.access_token, currentOrg?.id, currentOrg?.fabric_msp_id]);
+
+  // Clean up blob URLs when component unmounts
+  useEffect(() => {
+    return () => {
+      if (fileContent && !isText && fileContent.startsWith('blob:')) {
+        URL.revokeObjectURL(fileContent);
+      }
+    };
+  }, [fileContent, isText]);
+  
+  const getContent = () => {
+    if (loading) {
+      return (
+        <div className="flex flex-col items-center justify-center p-10">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mb-4"></div>
+          <p className="text-gray-600">Loading content from IPFS...</p>
+        </div>
+      );
+    }
+    
+    if (error) {
+      return (
+        <div className="flex flex-col items-center justify-center text-red-500 p-10">
+          <AlertCircle size={48} className="mb-4" />
+          <p className="text-center mb-2">{error}</p>
+          <p className="text-sm text-gray-500 mb-4">IPFS CID: {file.ipfsLocation}</p>
+          
+          <div className="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4">
+            <a 
+              href={ipfsGatewayUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            >
+              <ExternalLink size={16} className="mr-2" />
+              Open in IPFS Gateway
+            </a>
+            
+            <a 
+              href={serverProxyUrl}
+              download={file.name}
+              className="flex items-center justify-center px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors"
+            >
+              <Download size={16} className="mr-2" />
+              Download File
+            </a>
+          </div>
+        </div>
+      );
+    }
+
+    // For content that has been loaded
+    if (fileContent) {
       if (isImage) {
         return (
           <div className="flex items-center justify-center">
             <Image 
-              src={`data:${metadata.type};base64,${file.content}`}
+              src={fileContent}
               alt={file.name}
               width={900}
               height={800}
@@ -40,10 +169,10 @@ const FilePreviewModal = ({ file, onClose }: FilePreviewModalProps) => {
       }
 
       if (isText) {
-        const text = atob(file.content);
+        // For text content
         return (
           <pre className="whitespace-pre-wrap font-mono text-sm bg-gray-50 p-4 rounded-md overflow-auto max-h-[70vh]">
-            {text}
+            {fileContent}
           </pre>
         );
       }
@@ -51,28 +180,77 @@ const FilePreviewModal = ({ file, onClose }: FilePreviewModalProps) => {
       if (isPDF) {
         return (
           <iframe
-            src={`data:application/pdf;base64,${file.content}`}
+            src={fileContent}
             className="w-full h-[70vh]"
             title={file.name}
           />
         );
       }
 
+      // For other file types
       return (
         <div className="flex flex-col items-center justify-center text-gray-500">
-          <FileIcon size={48} className="mb-2" />
-          <p>Preview not available for this file type</p>
-          <p className="text-sm mt-2">{metadata.type}</p>
-        </div>
-      );
-    } catch (error) {
-      return (
-        <div className="flex flex-col items-center justify-center text-red-500">
-          <AlertCircle size={48} className="mb-2" />
-          <p>Error loading preview: {error instanceof Error ? error.message : 'Unknown error'}</p>
+          <FileIcon size={48} className="mb-4" />
+          <p className="mb-2">Preview not available for this file type</p>
+          <p className="text-sm mb-4">{metadata.type}</p>
+          <div className="flex space-x-4">
+            <a 
+              href={fileContent}
+              download={file.name}
+              className="flex items-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            >
+              <Download size={16} className="mr-2" />
+              Download File
+            </a>
+            
+            <a 
+              href={ipfsGatewayUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors"
+            >
+              <ExternalLink size={16} className="mr-2" />
+              View in IPFS Gateway
+            </a>
+          </div>
         </div>
       );
     }
+    
+    // No content available
+    return (
+      <div className="flex flex-col items-center justify-center text-gray-500">
+        <AlertCircle size={48} className="mb-4" />
+        <p className="mb-2">Content not available for preview</p>
+        {file.ipfsLocation ? (
+          <>
+            <p className="text-sm text-gray-400 mb-4">IPFS CID: {file.ipfsLocation}</p>
+            <div className="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4">
+              <a 
+                href={serverProxyUrl}
+                download={file.name}
+                className="flex items-center justify-center px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+              >
+                <Download size={16} className="mr-2" />
+                Download File
+              </a>
+              
+              <a 
+                href={ipfsGatewayUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors"
+              >
+                <ExternalLink size={16} className="mr-2" />
+                Open in IPFS Gateway
+              </a>
+            </div>
+          </>
+        ) : (
+          <p>This file has no IPFS location associated with it.</p>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -125,10 +303,32 @@ const FilePreviewModal = ({ file, onClose }: FilePreviewModalProps) => {
               <dd className="text-sm text-gray-900">{metadata.type}</dd>
               
               <dt className="text-sm font-medium text-gray-500">Hash</dt>
-              <dd className="text-sm font-mono text-gray-900">{file.hash}</dd>
+              <dd className="text-sm font-mono text-gray-900 truncate">{file.hash}</dd>
               
               <dt className="text-sm font-medium text-gray-500">Owner</dt>
               <dd className="text-sm text-gray-900">{file.owner}</dd>
+              
+              <dt className="text-sm font-medium text-gray-500">Storage</dt>
+              <dd className="text-sm text-gray-900">
+                {file.ipfsLocation ? (
+                  <span className="flex items-center">
+                    <span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-2"></span>
+                    IPFS
+                  </span>
+                ) : (
+                  <span className="flex items-center">
+                    <span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-2"></span>
+                    Blockchain
+                  </span>
+                )}
+              </dd>
+              
+              {file.ipfsLocation && (
+                <>
+                  <dt className="text-sm font-medium text-gray-500">IPFS CID</dt>
+                  <dd className="text-sm font-mono text-gray-900 truncate">{file.ipfsLocation}</dd>
+                </>
+              )}
             </dl>
           </div>
         </div>

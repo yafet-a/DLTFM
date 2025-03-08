@@ -24,6 +24,18 @@ services:
     networks:
       - fabric-network
 
+  # IPFS Node
+  ipfs:
+    container_name: ipfs-node
+    image: ipfs/kubo:latest
+    ports:
+      - "5001:5001"  # API port
+      - "8088:8080"  # Gateway port
+    volumes:
+      - ipfs_data:/data/ipfs
+    networks:
+      - fabric-network
+
   # Peer for Org1
   peer0.org1.example.com:
     container_name: peer0.org1.example.com
@@ -71,3 +83,6 @@ services:
 networks:
   fabric-network:
     name: fabric-network
+
+volumes:
+  ipfs_data:

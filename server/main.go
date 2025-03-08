@@ -3,12 +3,15 @@ package main
 import (
 	"crypto/sha256"
 	"dltfm/server/gateway"
+	"dltfm/server/ipfs"
 	"dltfm/server/middleware"
 	"dltfm/server/supabase"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	// "os"
 	// "path/filepath"
@@ -200,6 +203,98 @@ func main() {
 			c.JSON(http.StatusOK, json.RawMessage(result))
 		})
 
+		// Get file content
+		api.GET("/files/:id/content", func(c *gin.Context) {
+			userID := c.GetString("userID")
+			mspID := c.GetString("mspID")
+			org := c.MustGet("organization").(*supabase.Organization)
+			fileID := c.Param("id")
+
+			fmt.Printf("Content request for file: %s, user: %s, org: %s\n", fileID, userID, org.Name)
+			fmt.Printf("DEBUG: Fetching content for file ID: %s\n", fileID)
+
+			// Get the file metadata from the blockchain
+			gw, err := gatewayManager.GetGateway(mspID)
+			if err != nil {
+				fmt.Printf("DEBUG: Error getting gateway: %v\n", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get gateway: %v", err)})
+				return
+			}
+
+			network := gw.GetNetwork("mychannel")
+			contract := network.GetContract("chaincode")
+
+			fileJSON, err := contract.EvaluateTransaction("GetFileByID", fileID)
+			if err != nil {
+				fmt.Printf("DEBUG: Error getting file from blockchain: %v\n", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get file: %v", err)})
+				return
+			}
+
+			fmt.Printf("DEBUG: Got file JSON from blockchain: %s\n", string(fileJSON))
+
+			// Unmarshal into a struct that includes Metadata
+			var file struct {
+				IPFSLocation string `json:"ipfsLocation"`
+				Name         string `json:"name"`
+				Metadata     string `json:"metadata"`
+			}
+
+			if err := json.Unmarshal(fileJSON, &file); err != nil {
+				fmt.Printf("DEBUG: JSON unmarshal error: %v for JSON: %s\n", err, string(fileJSON))
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse file data"})
+				return
+			}
+
+			fmt.Printf("DEBUG: Parsed file data - IPFS CID: %s, Name: %s\n", file.IPFSLocation, file.Name)
+
+			// Define a struct to parse the metadata JSON
+			type FileMetadata struct {
+				Size      int64  `json:"size"`
+				Type      string `json:"type"`
+				CreatedAt string `json:"createdAt"`
+				Encoding  string `json:"encoding"`
+			}
+
+			// Unmarshal the metadata from the file
+			var meta FileMetadata
+			if err := json.Unmarshal([]byte(file.Metadata), &meta); err != nil {
+				fmt.Printf("DEBUG: Error parsing metadata: %v for metadata: %s\n", err, file.Metadata)
+				// Fallback if metadata cannot be parsed
+				meta.Type = "application/octet-stream"
+			} else {
+				fmt.Printf("DEBUG: Parsed metadata - Type: %s, Size: %d\n", meta.Type, meta.Size)
+			}
+
+			// Get the content from IPFS
+			fmt.Printf("DEBUG: About to retrieve content from IPFS with CID: %s\n", file.IPFSLocation)
+			ipfsClient := ipfs.NewIPFSClient("localhost:5001", false)
+			content, err := ipfsClient.GetFile(file.IPFSLocation)
+			if err != nil {
+				fmt.Printf("DEBUG: IPFS retrieval error: %v\n", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to retrieve file content: %v", err)})
+				return
+			}
+			fmt.Printf("DEBUG: Successfully retrieved %d bytes from IPFS\n", len(content))
+
+			// Determine Content-Type from metadata and set disposition accordingly
+			contentType := meta.Type
+			if contentType == "" {
+				contentType = "application/octet-stream"
+			}
+
+			// Default to attachment, but render inline for PDFs or images
+			disposition := "attachment"
+			if contentType == "application/pdf" || strings.HasPrefix(contentType, "image/") {
+				disposition = "inline"
+			}
+
+			fmt.Printf("DEBUG: Sending response with Content-Type: %s, Disposition: %s\n", contentType, disposition)
+			c.Header("Content-Disposition", fmt.Sprintf("%s; filename=\"%s\"", disposition, file.Name))
+			c.Header("Content-Type", contentType) // Make sure this is set
+			c.Data(http.StatusOK, contentType, content)
+		})
+
 		// Register a new file
 		api.POST("/files", func(c *gin.Context) {
 			userID := c.GetString("userID")
@@ -211,7 +306,7 @@ func main() {
 			var request struct {
 				ID                string `json:"id"`
 				Name              string `json:"name"`
-				Content           string `json:"content"`
+				Content           string `json:"content"` // This will be base64 content from client
 				Owner             string `json:"owner"`
 				Metadata          string `json:"metadata"`
 				PreviousID        string `json:"previousID"`
@@ -223,6 +318,23 @@ func main() {
 
 			if err := c.BindJSON(&request); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+				return
+			}
+
+			// Decode base64 content
+			contentBytes, err := base64.StdEncoding.DecodeString(request.Content)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file content"})
+				return
+			}
+
+			// Upload to IPFS
+			ipfsClient := ipfs.NewIPFSClient("localhost:5001", false)
+			ipfsCID, err := ipfsClient.AddFile(contentBytes)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": fmt.Sprintf("failed to store file: %v", err),
+				})
 				return
 			}
 
@@ -247,13 +359,11 @@ func main() {
 				return
 			}
 
-			fmt.Printf("DEBUG: RegisterFile called with id=%s, name=%s, org=%s, previousID=%s, endorsementConfig=%s\n",
-				request.ID, request.Name, org.Name, request.PreviousID, string(endorsementConfigJSON))
-
+			// Now pass IPFS CID instead of content
 			_, err = contract.SubmitTransaction("RegisterFile",
 				request.ID,
 				request.Name,
-				request.Content,
+				ipfsCID, // Pass IPFS CID instead of content
 				org.Name,
 				request.Metadata,
 				request.PreviousID,
@@ -271,6 +381,7 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{
 				"message": "File successfully registered",
 				"id":      request.ID,
+				"ipfsCID": ipfsCID, // Return the IPFS CID for client reference
 			})
 		})
 

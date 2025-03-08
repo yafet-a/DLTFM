@@ -9,13 +9,12 @@ type File struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
 	Hash             string   `json:"hash"`
-	StorageLocation  string   `json:"storageLocation"`
 	Timestamp        string   `json:"timestamp"`
 	Owner            string   `json:"owner"`
 	Metadata         string   `json:"metadata"`
 	Version          int      `json:"version"`
 	PreviousID       string   `json:"previousID,omitempty"`
-	Content          string   `json:"content"`
+	IPFSLocation     string   `json:"ipfsLocation"`
 	Status           string   `json:"status"`
 	RequiredOrgs     []string `json:"requiredOrgs"`
 	CurrentApprovals []string `json:"currentApprovals"`
