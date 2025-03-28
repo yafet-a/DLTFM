@@ -15,8 +15,8 @@ DLTFM is a prototype for a secure, enterprise-grade file management system built
 
 ## Architecture
 
-![Architecture Diagram](![image](https://github.com/user-attachments/assets/4839a768-6ef2-49ef-9133-d121e2ea13ed)
-)
+![image](https://github.com/user-attachments/assets/5d48f311-6787-4e35-b68a-085be046190e)
+
 
 DLTFM consists of three major components:
 
