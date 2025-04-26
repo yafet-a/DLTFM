@@ -7,6 +7,7 @@ volumes:
   orderer4.example.com:
   peer0.org1.example.com:
   peer0.org2.example.com:
+  ipfs_data:
 
 networks:
   test:
@@ -262,3 +263,14 @@ services:
       - 9445:9445
     networks:
       - test
+  
+  ipfs:
+      container_name: ipfs-node
+      image: ipfs/kubo:latest
+      ports:
+        - "5001:5001"  # API port
+        - "8080:8080"  # Gateway port
+      volumes:
+        - ipfs_data:/data/ipfs
+      networks:
+        - test  # Use the same network as your other services
