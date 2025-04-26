@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"os"
+	"time"
 
 	shell "github.com/ipfs/go-ipfs-api"
 )
@@ -47,30 +50,53 @@ func (c *IPFSClient) AddFile(fileContent []byte) (string, error) {
 	return cid, nil
 }
 
-// GetFile retrieves a file from IPFS by its CID
+// GetFile retrieves a file from IPFS by its CID with exponential backoff
 func (c *IPFSClient) GetFile(cid string) ([]byte, error) {
 	fmt.Printf("DEBUG: Retrieving file from IPFS with CID: %s\n", cid)
 
-	// Use Cat method to retrieve the file
-	reader, err := c.shell.Cat(cid)
-	if err != nil {
-		fmt.Printf("DEBUG: IPFS Cat failed: %v\n", err)
-		return nil, fmt.Errorf("failed to retrieve file from IPFS: %w", err)
+	var content []byte
+	var lastErr error
+
+	// Retry configuration
+	maxRetries := 5
+	baseDelay := 100 * time.Millisecond
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			// Calculate backoff with jitter
+			delay := baseDelay * time.Duration(math.Pow(2, float64(attempt)))
+			jitter := time.Duration(rand.Float64() * 0.4 * float64(delay))
+			delay = delay + jitter - (jitter / 2) // ±20% symmetric distribution
+
+			fmt.Printf("DEBUG: Attempt %d failed, retrying after %v\n", attempt, delay)
+			time.Sleep(delay)
+		}
+
+		// Use Cat method to retrieve the file
+		reader, err := c.shell.Cat(cid)
+		if err != nil {
+			lastErr = fmt.Errorf("IPFS Cat failed on attempt %d: %w", attempt+1, err)
+			fmt.Printf("DEBUG: %v\n", lastErr)
+			continue
+		}
+
+		// Read the content from the reader
+		content, err = io.ReadAll(reader)
+		reader.Close()
+
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read from IPFS stream on attempt %d: %w", attempt+1, err)
+			fmt.Printf("DEBUG: %v\n", lastErr)
+			continue
+		}
+
+		// Success!
+		fmt.Printf("DEBUG: Successfully read %d bytes from IPFS for CID: %s after %d attempt(s)\n",
+			len(content), cid, attempt+1)
+		return content, nil
 	}
-	defer reader.Close()
 
-	fmt.Printf("DEBUG: Successfully opened IPFS stream for CID: %s\n", cid)
-
-	// Read the content from the reader
-	content, err := io.ReadAll(reader)
-	if err != nil {
-		fmt.Printf("DEBUG: Failed to read from IPFS stream: %v\n", err)
-		return nil, fmt.Errorf("failed to read file content: %w", err)
-	}
-
-	fmt.Printf("DEBUG: Successfully read %d bytes from IPFS for CID: %s\n", len(content), cid)
-
-	return content, nil
+	return nil, fmt.Errorf("failed to retrieve file after %d attempts: %w", maxRetries, lastErr)
 }
 
 // PinFile pins a file in IPFS to ensure it persists

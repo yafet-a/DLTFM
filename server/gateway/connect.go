@@ -119,6 +119,7 @@ func newGrpcConnection(config OrgConfig) *grpc.ClientConn {
 }
 
 func newIdentity(config OrgConfig) (*identity.X509Identity, error) {
+	// First try the CA path (cert.pem)
 	certPath := filepath.Join(
 		getFabricSamplesDir(),
 		"test-network",
@@ -131,6 +132,23 @@ func newIdentity(config OrgConfig) (*identity.X509Identity, error) {
 		"signcerts",
 		"cert.pem",
 	)
+
+	// Check if file exists
+	if _, err := os.Stat(certPath); os.IsNotExist(err) {
+		// Try the BFT path with the longer filename
+		certPath = filepath.Join(
+			getFabricSamplesDir(),
+			"test-network",
+			"organizations",
+			"peerOrganizations",
+			config.CryptoPath,
+			"users",
+			fmt.Sprintf("Admin@%s", config.CryptoPath),
+			"msp",
+			"signcerts",
+			fmt.Sprintf("Admin@%s-cert.pem", config.CryptoPath),
+		)
+	}
 
 	certificatePEM, err := ioutil.ReadFile(certPath)
 	if err != nil {
@@ -151,7 +169,7 @@ func newIdentity(config OrgConfig) (*identity.X509Identity, error) {
 }
 
 func newSign(config OrgConfig) (identity.Sign, error) {
-	keyPath := filepath.Join(
+	keyDir := filepath.Join(
 		getFabricSamplesDir(),
 		"test-network",
 		"organizations",
@@ -163,7 +181,8 @@ func newSign(config OrgConfig) (identity.Sign, error) {
 		"keystore",
 	)
 
-	files, err := ioutil.ReadDir(keyPath)
+	// Try to find the key file
+	files, err := ioutil.ReadDir(keyDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read keystore directory: %w", err)
 	}
@@ -172,7 +191,8 @@ func newSign(config OrgConfig) (identity.Sign, error) {
 		return nil, fmt.Errorf("no private key found in keystore directory")
 	}
 
-	privateKeyPath := filepath.Join(keyPath, files[0].Name())
+	// Use the first file found (this works for both CA and BFT scenarios)
+	privateKeyPath := filepath.Join(keyDir, files[0].Name())
 	privateKeyPEM, err := ioutil.ReadFile(privateKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read private key file: %w", err)

@@ -17,9 +17,10 @@ show_setup_menu() {
     echo "╠════════════════════════════════════╣"
     echo "║ 1. Deploy/Update Chaincode         ║"
     echo "║ 2. Setup Network + Deploy          ║"
-    echo "║ 3. Exit                            ║"
+    echo "║ 3. Start Monitoring                ║"
+    echo "║ 4. Exit                            ║"
     echo "╚════════════════════════════════════╝"
-    echo "Enter your choice (1-3): "
+    echo "Enter your choice (1-4): "
 }
 
 # Get the directory of the current script
@@ -75,8 +76,8 @@ setup_network() {
     log "info" "Setting up Hyperledger Fabric network..."
     
     cd "$FABRIC_SAMPLES_DIR/test-network" || exit
-    
-    # Check if network is already up
+
+    # Tear down any existing network
     if docker ps | grep -q "orderer.example.com"; then
         log "warn" "Network appears to be already running"
         read -p "Do you want to tear it down and restart? (y/n) " -n 1 -r
@@ -87,10 +88,24 @@ setup_network() {
             return 0
         fi
     fi
-    
-    ./network.sh up createChannel -c mychannel -ca
-    check_status "Network setup" || return 1
+
+    # Ask user if they want to use BFT
+    read -p "Use SmartBFT ordering service? (y/n): " -n 1 -r
+    echo
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        ./network.sh up -bft
+        check_status "Network startup with SmartBFT" || return 1
+        ./network.sh createChannel -bft -c mychannel
+        check_status "Channel creation with SmartBFT" || return 1
+    else
+        ./network.sh up -ca
+        check_status "Network startup with Raft" || return 1
+        ./network.sh createChannel -c mychannel
+        check_status "Channel creation with Raft" || return 1
+    fi
 }
+
 
 get_current_version() {
     local cc_name=$1
@@ -115,6 +130,7 @@ increment_version() {
 }
 
 # Function to deploy chaincode
+export FABRIC_LOGGING_SPEC="error:grpc=error"
 deploy_chaincode() {
     log "info" "Starting chaincode deployment process..."
 
@@ -126,7 +142,7 @@ deploy_chaincode() {
     # Define chaincode parameters
     CHAINCODE_NAME="chaincode"
     CHAINCODE_VERSION="1.0"
-    CHAINCODE_LABEL="${CHAINCODE_NAME}_${CHAINCODE_VERSION}"
+    CHAINCODE_LABEL="${CHAINCODE_NAME}"
     CHAINCODE_PATH="$SCRIPT_DIR/../chaincode/chaincode.tar.gz"
 
     # Verify chaincode package exists
@@ -137,17 +153,17 @@ deploy_chaincode() {
 
     # Get current sequence number
     COMMITTED_INFO=$(peer lifecycle chaincode querycommitted -C mychannel -n $CHAINCODE_NAME 2>&1)
-    echo "Debug - Committed info: $COMMITTED_INFO"  # Add this line
+    echo "Debug - Committed info: $COMMITTED_INFO"
 
     if echo "$COMMITTED_INFO" | grep -q "Chaincode definition for name.*not found"; then
         # Chaincode not committed yet, start with sequence 1
         SEQUENCE=1
-        echo "Debug - Setting initial sequence to 1"  # Add this line
+        echo "Debug - Setting initial sequence to 1"
     else
         # Get current sequence and increment
         CURRENT_SEQUENCE=$(echo "$COMMITTED_INFO" | grep -o "Sequence: [0-9]*" | cut -d' ' -f2)
         SEQUENCE=$((CURRENT_SEQUENCE + 1))
-        echo "Debug - Incrementing sequence from $CURRENT_SEQUENCE to $SEQUENCE"  # Add this line
+        echo "Debug - Incrementing sequence from $CURRENT_SEQUENCE to $SEQUENCE"
     fi
 
     # Function to set organization context
@@ -191,9 +207,29 @@ deploy_chaincode() {
                 continue
             fi
 
-            # Query again to get the package ID after installation
-            INSTALLED_CHAINCODE=$(peer lifecycle chaincode queryinstalled --output json 2>&1)
-            PACKAGE_ID=$(echo "$INSTALLED_CHAINCODE" | jq -r '.installed_chaincodes[0].package_id')
+            RAW_OUTPUT=$(peer lifecycle chaincode queryinstalled --output json 2>&1)
+
+            echo "Debug - Raw output:"
+            echo "$RAW_OUTPUT"
+
+            PACKAGE_ID=$(echo "$RAW_OUTPUT" | jq -r --arg LABEL "$CHAINCODE_LABEL" '.installed_chaincodes[] | select(.label==$LABEL) | .package_id')
+
+
+            echo "Debug - Extracted PACKAGE_ID: $PACKAGE_ID"
+
+            # Fallback check
+            if [ -z "$PACKAGE_ID" ] || [ "$PACKAGE_ID" = "null" ]; then
+                log "error" "Unable to extract PACKAGE_ID after installation."
+                echo "Full peer output was:"
+                echo "$RAW_OUTPUT"
+                return 1
+            fi
+
+
+            if [ -z "$PACKAGE_ID" ] || [ "$PACKAGE_ID" = "null" ]; then
+                # If that didn't work, extract using a direct substring approach
+                PACKAGE_ID=$(echo "$INSTALLED_CHAINCODE" | grep -o '"package_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+            fi
             
             if [ -z "$PACKAGE_ID" ]; then
                 log "error" "Unable to extract PACKAGE_ID after installation."
@@ -283,6 +319,36 @@ package_chaincode() {
     fi
 }
 
+start_monitoring() {
+    log "info" "Starting Prometheus and Grafana monitoring..."
+    
+    # Navigate to the prometheus-grafana directory
+    cd "$FABRIC_SAMPLES_DIR/test-network/prometheus-grafana" || exit
+    
+    # Check if monitoring is already running
+    if docker ps | grep -q "prometheus"; then
+        log "warn" "Monitoring appears to be already running"
+        read -p "Do you want to restart it? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            docker-compose down
+        else
+            return 0
+        fi
+    fi
+    
+    # Start the monitoring stack
+    docker-compose up -d
+    
+    check_status "Monitoring setup" || return 1
+    
+    log "success" "Monitoring started successfully!"
+    log "info" "Grafana dashboard available at: http://localhost:3000 (admin/admin)"
+    log "info" "Prometheus available at: http://localhost:9090"
+    log "info" "cAdvisor available at: http://localhost:8082"
+    return 0
+}
+
 # Main menu logic
 while true; do
     if ! check_docker; then
@@ -308,10 +374,14 @@ while true; do
             break
             ;;
         3)
+            start_monitoring
+            break
+            ;;
+        4)
             log "info" "Exiting..."
             exit 0
             ;;
-        *)
+            *)
             log "error" "Invalid option. Please choose 1-3"
             ;;
     esac
