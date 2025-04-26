@@ -211,8 +211,92 @@ export default function Home() {
   };
 
   const getFileVersions = (file: BlockchainFile) => {
-    return files.filter(f => f.hash === file.hash);
+    // Start with the selected file
+    const versions = [file];
+    const processedIds = new Set<string>([file.id]);
+    
+    // Build a map of previous relationships for faster lookup
+    const previousIdMap = new Map<string, BlockchainFile>();
+    files.forEach(f => {
+      if (f.previousID) {
+        previousIdMap.set(f.previousID, f);
+      }
+    });
+  
+    // Find previous versions by following previousID chain
+    let currentFile = file;
+    while (currentFile.previousID) {
+      const previousFile = files.find(f => f.id === currentFile.previousID);
+      if (previousFile && !processedIds.has(previousFile.id)) {
+        versions.push(previousFile);
+        processedIds.add(previousFile.id);
+        currentFile = previousFile;
+      } else {
+        break;
+      }
+    }
+  
+    // Find next versions by checking what files reference these as previousID
+    // This helps find forward-branching versions
+    let foundNew = true;
+    while (foundNew) {
+      foundNew = false;
+      
+      for (const id of processedIds) {
+        const nextVersions = files.filter(f => 
+          f.previousID === id && !processedIds.has(f.id)
+        );
+        
+        if (nextVersions.length > 0) {
+          for (const nextVersion of nextVersions) {
+            versions.push(nextVersion);
+            processedIds.add(nextVersion.id);
+            foundNew = true;
+          }
+        }
+      }
+    }
+  
+    // Sort by version number in descending order
+    return versions.sort((a, b) => b.version - a.version);
   };
+
+  const groupFilesByPreviousID = useCallback((files: BlockchainFile[]) => {
+    const groups = new Map<string, BlockchainFile[]>();
+  
+    files.forEach(file => {
+      // Determine the root file by following the previousID chain
+      let rootID = file.id;
+      let currentFile = file;
+      while (currentFile.previousID) {
+        rootID = currentFile.previousID;
+        currentFile = files.find(f => f.id === currentFile.previousID) || file;
+      }
+  
+      // Group all versions under the root file
+      if (!groups.has(rootID)) {
+        groups.set(rootID, []);
+      }
+      const group = groups.get(rootID)!;
+      group.push(file);
+      groups.set(rootID, group.sort((a, b) => b.version - a.version)); // Sort by version descending
+    });
+  
+    return groups;
+  }, [files]);
+  
+  // Get only the latest version from each group
+  const getLatestVersionsOnly = useCallback(() => {
+    const groups = groupFilesByPreviousID(files);
+    const latestVersions: BlockchainFile[] = [];
+    
+    groups.forEach(group => {
+      // The first file in each group is the latest version (already sorted)
+      latestVersions.push(group[0]);
+    });
+    
+    return latestVersions;
+  }, [files, groupFilesByPreviousID]);
 
   if (!session) {
     return <LoginScreen />;
@@ -357,7 +441,7 @@ export default function Home() {
                           />
                           New File
                         </CommandItem>
-                        {files.map((file) => (
+                        {getLatestVersionsOnly().map((file) => (
                           <CommandItem
                             key={file.id}
                             onSelect={() => {
@@ -462,6 +546,7 @@ export default function Home() {
           versions={getFileVersions(selectedVersionFile)}
           open={true}
           onClose={() => setSelectedVersionFile(null)}
+          onRefresh={loadFiles} // Add this line to allow refreshing after restore
         />
       )}
     </div>

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { Check, ChevronsUpDown, Shield } from "lucide-react"
+import { Check, ChevronsUpDown, Shield, Loader2 } from "lucide-react"
 // import { AnimatedBeam } from "@/components/magicui/animated-beam"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -43,6 +43,7 @@ const policyOptions = [
 
 export function EndorsementWizard({ onSubmit, onCancel }: EndorsementWizardProps) {
     const { currentOrg } = useOrg();
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Create refs for AnimatedBeam
     const containerRef = useRef<HTMLDivElement>(null);
@@ -56,6 +57,46 @@ export function EndorsementWizard({ onSubmit, onCancel }: EndorsementWizardProps
 
     const [openPolicyCombo, setOpenPolicyCombo] = React.useState(false);
 
+    const handleSubmit = () => {
+        if (isSubmitting) return; // Prevent multiple submissions
+        
+        setIsSubmitting(true);
+        
+        let finalPolicy = config.policyType;
+        let finalRequiredOrgs: string[] = [];
+        
+        // Get current org MSP ID
+        const currentOrgMSP = currentOrg?.fabric_msp_id || "Org1MSP";
+        
+        switch (config.policyType) {
+            case "ALL_ORGS":
+                finalRequiredOrgs = [currentOrgMSP, "Org2MSP"];
+                break;
+            case "ANY_ORG":
+                finalRequiredOrgs = [currentOrgMSP, "Org2MSP"]; // Include all orgs as "eligible"
+                break;
+            case "SPECIFIC_ORGS":
+                // If only current org is selected, switch to ANY_ORG
+                if (config.requiredOrgs.length === 0) {
+                    finalPolicy = "ANY_ORG";
+                    finalRequiredOrgs = [currentOrgMSP];
+                    // You could show a toast notification here explaining the switch
+                } else {
+                    finalRequiredOrgs = [currentOrgMSP, ...config.requiredOrgs];
+                }
+                break;
+        }
+        
+        // Call the onSubmit handler with the final configuration
+        onSubmit({
+            policyType: finalPolicy,
+            requiredOrgs: finalRequiredOrgs,
+        });
+        
+        // Note: We don't reset isSubmitting here as the component will likely be unmounted
+        // after submission. If the component remains mounted, the parent should handle
+        // resetting the wizard state.
+    };
 
     return (
         <Card className="w-full relative overflow-hidden">
@@ -77,6 +118,7 @@ export function EndorsementWizard({ onSubmit, onCancel }: EndorsementWizardProps
                                 role="combobox"
                                 aria-expanded={openPolicyCombo}
                                 className="w-full justify-between"
+                                disabled={isSubmitting}
                             >
                                 {
                                     policyOptions.find((opt) => opt.value === config.policyType)?.label ||
@@ -135,6 +177,7 @@ export function EndorsementWizard({ onSubmit, onCancel }: EndorsementWizardProps
                                 <Checkbox
                                     id="org2"
                                     checked={config.requiredOrgs.includes("Org2MSP")}
+                                    disabled={isSubmitting}
                                     onCheckedChange={(checked) => {
                                         const newOrgs = checked
                                             ? [...config.requiredOrgs, "Org2MSP"]
@@ -164,44 +207,21 @@ export function EndorsementWizard({ onSubmit, onCancel }: EndorsementWizardProps
             </CardContent>
 
             <CardFooter className="flex justify-between">
-                <Button variant="ghost" onClick={onCancel}>
+                <Button variant="ghost" onClick={onCancel} disabled={isSubmitting}>
                     Cancel
                 </Button>
                 <Button
-                // When submitting the form
-                onClick={() => {
-                    let finalPolicy = config.policyType;
-                    let finalRequiredOrgs: string[] = [];
-                    
-                    // Get current org MSP ID
-                    const currentOrgMSP = currentOrg?.fabric_msp_id || "Org1MSP";
-                    
-                    switch (config.policyType) {
-                        case "ALL_ORGS":
-                            finalRequiredOrgs = [currentOrgMSP, "Org2MSP"];
-                            break;
-                        case "ANY_ORG":
-                            finalRequiredOrgs = [currentOrgMSP, "Org2MSP"]; // Include all orgs as "eligible"
-                            break;
-                        case "SPECIFIC_ORGS":
-                            // If only current org is selected, switch to ANY_ORG
-                            if (config.requiredOrgs.length === 0) {
-                                finalPolicy = "ANY_ORG";
-                                finalRequiredOrgs = [currentOrgMSP];
-                                // You could show a toast notification here explaining the switch
-                            } else {
-                                finalRequiredOrgs = [currentOrgMSP, ...config.requiredOrgs];
-                            }
-                            break;
-                    }
-                    
-                    onSubmit({
-                        policyType: finalPolicy,
-                        requiredOrgs: finalRequiredOrgs,
-                    });
-                }}
+                    onClick={handleSubmit}
+                    disabled={isSubmitting}
                 >
-                    Configure Endorsement
+                    {isSubmitting ? (
+                        <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Registering to Blockchain...
+                        </>
+                    ) : (
+                        "Configure Endorsement"
+                    )}
                 </Button>
             </CardFooter>
         </Card>

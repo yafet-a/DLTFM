@@ -254,7 +254,7 @@ const FilePreviewModal = ({ file, onClose }: FilePreviewModalProps) => {
   };
 
   return (
-    <div className="fixed inset-0 overflow-y-auto z-50">
+    <div className="fixed inset-0 overflow-y-auto z-50 z-[9999]">
       <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-4 text-center sm:block sm:p-0">
         <div className="fixed inset-0 transition-opacity" aria-hidden="true">
           <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
@@ -302,8 +302,8 @@ const FilePreviewModal = ({ file, onClose }: FilePreviewModalProps) => {
               <dt className="text-sm font-medium text-gray-500">Type</dt>
               <dd className="text-sm text-gray-900">{metadata.type}</dd>
               
-              <dt className="text-sm font-medium text-gray-500">Hash</dt>
-              <dd className="text-sm font-mono text-gray-900 truncate">{file.hash}</dd>
+              {/* <dt className="text-sm font-medium text-gray-500">Hash</dt>
+              <dd className="text-sm font-mono text-gray-900 truncate">{file.hash}</dd> */}
               
               <dt className="text-sm font-medium text-gray-500">Owner</dt>
               <dd className="text-sm text-gray-900">{file.owner}</dd>
