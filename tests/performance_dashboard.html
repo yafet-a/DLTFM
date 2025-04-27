@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>System Performance Dashboard</title>
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & React‑DOM (UMD bundles) -->
+  <script src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+  <!-- Babel for in‑browser JSX/ES6 transform -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Recharts (UMD) → attaches to window.Recharts -->
+  <script src="https://cdn.jsdelivr.net/npm/recharts/umd/Recharts.min.js" crossorigin></script>
+  <!-- Papa Parse for CSV parsing -->
+  <script src="https://unpkg.com/papaparse@5.3.2/papaparse.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // Grab React helpers & Recharts components from globals ----------------------------------
+    const { useState, useCallback } = React;
+    // Fix: Access Recharts components from window.Recharts instead of destructuring
+    const {
+      ResponsiveContainer, ComposedChart, CartesianGrid, XAxis, YAxis,
+      Tooltip, Legend, Bar, Line, BarChart, LineChart,
+    } = window.Recharts;
+
+    // ------------------------- Utility helpers -------------------------
+    const calculateThroughput = (fileSize, durationMs) => {
+      if (!fileSize || !durationMs || durationMs <= 0 || fileSize <= 0) return 0;
+      const sizeMB = fileSize / (1024 * 1024);
+      const durationS = durationMs / 1000;
+      return sizeMB / durationS;
+    };
+    const formatSize = (bytes) => {
+      if (bytes === undefined || bytes === null) return 'N/A';
+      if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+      if (bytes >= 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+      return `${bytes} B`;
+    };
+
+    // ------------------------- Main component -------------------------
+    function PerformanceDashboard() {
+      // ---- state ----
+      const [allData, setAllData] = useState([]);
+      const [fileUploadStats, setFileUploadStats] = useState([]);
+      const [concurrentUploads, setConcurrentUploads] = useState([]);
+      const [contentRetrievals, setContentRetrievals] = useState([]);
+      const [versionOperationGroups, setVersionOperationGroups] = useState([]);
+      const [operationOverviewStats, setOperationOverviewStats] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+      const [fileName, setFileName] = useState('');
+
+      const resetState = () => {
+        setAllData([]);
+        setFileUploadStats([]);
+        setConcurrentUploads([]);
+        setContentRetrievals([]);
+        setVersionOperationGroups([]);
+        setOperationOverviewStats([]);
+        setError('');
+        setFileName('');
+      };
+
+      // ------------ CSV → processed series -------------
+      const processData = useCallback((parsedData) => {
+        if (!parsedData?.length) {
+          setError('Parsed data is empty or invalid.');
+          return;
+        }
+        try {
+          // 1️⃣  File‑upload stats ------------------------------------------------
+          const uploads = parsedData.filter(
+            (r) => r.operation === 'file_upload' && r.filename && r.fileSize > 0 && r.duration > 0,
+          );
+          const uploadsByName = {};
+          uploads.forEach((r) => {
+            if (!uploadsByName[r.filename]) uploadsByName[r.filename] = { durations: [], size: r.fileSize };
+            uploadsByName[r.filename].durations.push(r.duration);
+          });
+          const fuStats = Object.entries(uploadsByName)
+            .map(([filename, s]) => {
+              const avgD = s.durations.reduce((a, v) => a + v, 0) / s.durations.length;
+              const minD = Math.min(...s.durations);
+              const maxD = Math.max(...s.durations);
+              return {
+                filename,
+                size: s.size,
+                sizeLabel: formatSize(s.size),
+                count: s.durations.length,
+                avgDuration: avgD,
+                minDuration: minD,
+                maxDuration: maxD,
+                avgThroughput: calculateThroughput(s.size, avgD),
+                minThroughput: calculateThroughput(s.size, maxD),
+                maxThroughput: calculateThroughput(s.size, minD),
+                label: `${filename} (${formatSize(s.size)})`,
+              };
+            })
+            .sort((a, b) => a.size - b.size);
+          setFileUploadStats(fuStats);
+
+          // 2️⃣  Concurrent uploads ----------------------------------------------
+          const concurrent = parsedData
+            .filter(
+              (r) => r.operation === 'concurrent_upload' && r.batchSize > 0 && r.duration > 0 && r.throughput !== undefined,
+            )
+            .map((r) => ({
+              ...r,
+              durationSeconds: r.duration / 1000,
+              efficiency: r.batchSize ? r.throughput / r.batchSize : 0,
+              successRate: r.batchSize ? (r.successCount / r.batchSize) * 100 : 0,
+              label: `Batch ${r.batchSize}`,
+            }))
+            .sort((a, b) => (a.batchSize ?? 0) - (b.batchSize ?? 0));
+          setConcurrentUploads(concurrent);
+
+          // 3️⃣  Content retrieval -----------------------------------------------
+          const retrievals = parsedData
+            .filter((r) => r.operation === 'content_retrieval' && r.iteration !== undefined && r.duration > 0)
+            .map((r) => ({ ...r, label: `Iteration ${r.iteration}` }))
+            .sort((a, b) => (a.iteration ?? 0) - (b.iteration ?? 0));
+          setContentRetrievals(retrievals);
+
+          // 4️⃣  Version create / fetch -------------------------------------------
+          const versionOpsRaw = parsedData.filter(
+            (r) => ['version_create', 'version_fetch'].includes(r.operation) && r.versionNumber !== undefined && r.duration > 0,
+          );
+          const vGroups = {};
+          versionOpsRaw.forEach((r) => {
+            if (!vGroups[r.versionNumber]) vGroups[r.versionNumber] = { versionNumber: r.versionNumber };
+            if (r.operation === 'version_create') vGroups[r.versionNumber].createDuration = r.duration;
+            else vGroups[r.versionNumber].fetchDuration = r.duration;
+          });
+          setVersionOperationGroups(Object.values(vGroups).sort((a, b) => a.versionNumber - b.versionNumber));
+
+          // 5️⃣  Overview ----------------------------------------------------------
+          const ops = {};
+          parsedData.forEach((r) => {
+            if (r.duration > 0 && r.operation) {
+              if (!ops[r.operation]) ops[r.operation] = { durs: [] };
+              ops[r.operation].durs.push(r.duration);
+            }
+          });
+          const overview = Object.entries(ops)
+            .map(([name, o]) => ({
+              name,
+              count: o.durs.length,
+              avgDuration: o.durs.reduce((a, v) => a + v, 0) / o.durs.length,
+              minDuration: Math.min(...o.durs),
+              maxDuration: Math.max(...o.durs),
+            }))
+            .sort((a, b) => a.avgDuration - b.avgDuration);
+          setOperationOverviewStats(overview);
+        } catch (e) {
+          console.error(e);
+          setError(`Error processing data: ${e.message}`);
+        }
+      }, []);
+
+      // ------------ file input handler ----------------
+      const handleFileChange = (e) => {
+        resetState();
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith('.csv')) {
+          setError('Invalid file type. Please upload a .csv file.');
+          e.target.value = '';
+          return;
+        }
+        setFileName(file.name);
+        setLoading(true);
+        setError('');
+
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          dynamicTyping: true,
+          complete: (results) => {
+            if (results.errors?.length) {
+              const err = results.errors[0];
+              setError(`Error parsing CSV (row ${err.row}): ${err.message}`);
+              setLoading(false);
+              e.target.value = '';
+              setFileName('');
+            } else if (!results.data.length) {
+              setError('CSV file is empty.');
+              setLoading(false);
+              e.target.value = '';
+              setFileName('');
+            } else {
+              setAllData(results.data);
+              processData(results.data);
+              setLoading(false);
+            }
+          },
+          error: (err) => {
+            setError(`Failed to parse CSV: ${err.message}`);
+            setLoading(false);
+            e.target.value = '';
+            setFileName('');
+          },
+        });
+      };
+
+      // ------------ styling helpers -------------------
+      const chartMargin = { top: 5, right: 30, left: 20, bottom: 25 };
+      const axisLabelStyle = { fontSize: '0.8rem', fill: '#666' };
+      const titleStyle = 'text-xl font-semibold mb-4 text-center text-gray-700';
+      const chartContainerStyle = 'bg-white p-4 rounded-lg shadow';
+
+      // Tooltip helpers (return array → label/value)
+      const msFormatter = (v) => [v.toFixed(2) + ' ms', null];
+      const mbpsFormatter = (v) => [v.toFixed(3) + ' MB/s', null];
+      const txpsFormatter = (v) => [v.toFixed(3) + ' tx/s', null];
+      const secondsFormatter = (v) => [v.toFixed(2) + ' s', null];
+      const efficiencyFormatter = (v) => [v.toFixed(4) + ' tx/s/item', null];
+      const percentFormatter = (v) => [v.toFixed(1) + '%', null];
+      const countFormatter = (v) => [v.toString(), null];
+
+      // -------------------------- UI --------------------------
+      return (
+        <div className="p-4 md:p-6 bg-gray-100 min-h-screen font-sans">
+          {/* Header + file chooser */}
+          <header className="mb-6">
+            <h1 className="text-3xl font-bold text-center text-gray-800">System Performance Dashboard</h1>
+            <div className="mt-4 max-w-xl mx-auto flex flex-col items-center space-y-2">
+              <label htmlFor="csvUpload" className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                Upload Performance CSV
+              </label>
+              <input id="csvUpload" type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
+              {fileName && <p className="text-sm text-gray-600">Loaded: {fileName}</p>}
+              {error && <p className="text-red-600 text-sm font-medium mt-2 text-center">{error}</p>}
+            </div>
+          </header>
+
+          {/* Loading indicator */}
+          {loading && (
+            <div className="flex items-center justify-center min-h-[60vh]">
+              <div className="text-xl font-semibold text-gray-600">Processing data...</div>
+            </div>
+          )}
+
+          {/* Main dashboard */}
+          {!loading && allData.length > 0 && (
+            <main className="space-y-6">
+              {/* Operation overview */}
+              {operationOverviewStats.length > 0 && (
+                <div className={chartContainerStyle}>
+                  <h2 className={titleStyle}>Operation Performance Overview</h2>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <ComposedChart data={operationOverviewStats} margin={{ top: 5, right: 30, left: 30, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                      <XAxis dataKey="name" angle={-20} textAnchor="end" height={60} interval={0} tick={{ fontSize: '0.75rem' }} />
+                      <YAxis yAxisId="left" scale="log" type="number" domain={[0.1, 'auto']} allowDataOverflow label={{ value: 'Avg Duration (ms) - Log', angle: -90, position: 'insideLeft', style: axisLabelStyle, offset: -5 }} tickFormatter={(val) => val.toExponential(0)} />
+                      <YAxis yAxisId="right" orientation="right" type="number" label={{ value: 'Operation Count', angle: 90, position: 'insideRight', style: axisLabelStyle }} />
+                      <Tooltip formatter={(v, n) => (n === 'count' ? countFormatter(v) : msFormatter(v))} />
+                      <Legend verticalAlign="top" height={36} />
+                      <Bar yAxisId="left" dataKey="avgDuration" fill="#8884d8" name="Avg Duration (ms)" />
+                      <Line yAxisId="right" type="monotone" dataKey="count" stroke="#ff7300" strokeWidth={2} name="Operation Count" dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* File upload charts */}
+              {fileUploadStats.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className={chartContainerStyle}>
+                    <h2 className={titleStyle}>File Upload Duration (Min/Avg/Max)</h2>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <BarChart data={fileUploadStats} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                        <XAxis dataKey="label" angle={-15} textAnchor="end" height={50} interval={0} tick={{ fontSize: '0.7rem' }} />
+                        <YAxis type="number" label={{ value: 'Duration (ms)', angle: -90, position: 'insideLeft', style: axisLabelStyle }} />
+                        <Tooltip formatter={msFormatter} />
+                        <Legend verticalAlign="top" height={36} />
+                        <Bar dataKey="minDuration" fill="#82ca9d" name="Min" />
+                        <Bar dataKey="avgDuration" fill="#8884d8" name="Avg" />
+                        <Bar dataKey="maxDuration" fill="#ffc658" name="Max" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className={chartContainerStyle}>
+                    <h2 className={titleStyle}>File Upload Throughput (Min/Avg/Max)</h2>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <BarChart data={fileUploadStats} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                        <XAxis dataKey="label" angle={-15} textAnchor="end" height={50} interval={0} tick={{ fontSize: '0.7rem' }} />
+                        <YAxis type="number" domain={[0, 'auto']} label={{ value: 'Throughput (MB/s)', angle: -90, position: 'insideLeft', style: axisLabelStyle }} />
+                        <Tooltip formatter={mbpsFormatter} />
+                        <Legend verticalAlign="top" height={36} />
+                        <Bar dataKey="minThroughput" fill="#82ca9d" name="Min" />
+                        <Bar dataKey="avgThroughput" fill="#8884d8" name="Avg" />
+                        <Bar dataKey="maxThroughput" fill="#ffc658" name="Max" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {/* Concurrent uploads */}
+              {concurrentUploads.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className={chartContainerStyle}>
+                    <h2 className={titleStyle}>Concurrent Upload: Throughput & Time</h2>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <ComposedChart data={concurrentUploads} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                        <XAxis dataKey="label" tick={{ fontSize: '0.8rem' }} label={{ value: 'Batch Size', position: 'insideBottom', offset: -15, style: axisLabelStyle }} />
+                        <YAxis yAxisId="left" type="number" label={{ value: 'Throughput (tx/s)', angle: -90, position: 'insideLeft', style: axisLabelStyle }} />
+                        <YAxis yAxisId="right" type="number" orientation="right" label={{ value: 'Time (s)', angle: 90, position: 'insideRight', style: axisLabelStyle }} />
+                        <Tooltip formatter={(v, n) => (n.includes('Time') ? secondsFormatter(v) : txpsFormatter(v))} />
+                        <Legend verticalAlign="top" height={36} />
+                        <Bar yAxisId="left" dataKey="throughput" fill="#82ca9d" name="Throughput (tx/s)" />
+                        <Line yAxisId="right" type="monotone" dataKey="durationSeconds" stroke="#ff7300" strokeWidth={2} name="Exec. Time (s)" dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className={chartContainerStyle}>
+                    <h2 className={titleStyle}>Concurrent Upload: Efficiency & Success</h2>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <ComposedChart data={concurrentUploads} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                        <XAxis dataKey="label" tick={{ fontSize: '0.8rem' }} label={{ value: 'Batch Size', position: 'insideBottom', offset: -15, style: axisLabelStyle }} />
+                        <YAxis yAxisId="left" type="number" label={{ value: 'Efficiency (tx/s/item)', angle: -90, position: 'insideLeft', style: axisLabelStyle }} />
+                        <YAxis yAxisId="right" type="number" domain={[0, 100]} orientation="right" label={{ value: 'Success Rate (%)', angle: 90, position: 'insideRight', style: axisLabelStyle }} />
+                        <Tooltip formatter={(v, n) => (n.includes('Efficiency') ? efficiencyFormatter(v) : percentFormatter(v))} />
+                        <Legend verticalAlign="top" height={36} />
+                        <Line yAxisId="left" type="monotone" dataKey="efficiency" stroke="#8884d8" strokeWidth={2} name="Efficiency" dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        <Line yAxisId="right" type="monotone" dataKey="successRate" stroke="#e65100" strokeWidth={2} name="Success Rate (%)" dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {/* Content retrieval & version ops */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Content retrieval */}
+                {contentRetrievals.length > 0 && (
+                  <div className={chartContainerStyle}>
+                    <h2 className={titleStyle}>Content Retrieval Time by Iteration</h2>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <LineChart data={contentRetrievals} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                        <XAxis dataKey="iteration" type="number" label={{ value: 'Iteration', position: 'insideBottom', offset: -15, style: axisLabelStyle }} />
+                        <YAxis type="number" label={{ value: 'Duration (ms)', angle: -90, position: 'insideLeft', style: axisLabelStyle }} />
+                        <Tooltip formatter={msFormatter} />
+                        <Line type="monotone" dataKey="duration" stroke="#0088FE" name="Duration" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {/* Version ops */}
+                {versionOperationGroups.length > 0 && (
+                  <div className={chartContainerStyle}>
+                    <h2 className={titleStyle}>Version Create vs Fetch Time</h2>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <BarChart data={versionOperationGroups} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                        <XAxis dataKey="versionNumber" type="number" label={{ value: 'Version Number', position: 'insideBottom', offset: -15, style: axisLabelStyle }} />
+                        <YAxis type="number" scale="log" domain={[0.1, 'auto']} allowDataOverflow label={{ value: 'Duration (ms) - Log', angle: -90, position: 'insideLeft', style: axisLabelStyle, offset: -5 }} tickFormatter={(v) => (v > 1 ? v.toFixed(0) : v.toFixed(1))} />
+                        <Tooltip formatter={msFormatter} />
+                        <Legend verticalAlign="top" height={36} />
+                        <Bar dataKey="createDuration" fill="#ff7300" name="Create Time" />
+                        <Bar dataKey="fetchDuration" fill="#387908" name="Fetch Time" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+
+              {/* Summary table */}
+              {operationOverviewStats.length > 0 && (
+                <div className={`${chartContainerStyle} overflow-x-auto`}>
+                  <h2 className={titleStyle}>Performance Summary Table</h2>
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {['Operation', 'Count', 'Avg (ms)', 'Min (ms)', 'Max (ms)'].map((h) => (
+                          <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {operationOverviewStats.map((op, i) => (
+                        <tr
+                          key={op.name}
+                          className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50 hover:bg-gray-100'}
+                        >
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {op.name}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{op.count}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                            {op.avgDuration.toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                            {op.minDuration.toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                            {op.maxDuration.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </main>
+          )}
+
+          {/* Initial prompt */}
+          {!loading && allData.length === 0 && !error && (
+            <div className="flex items-center justify-center min-h-[60vh]">
+              <p className="text-lg text-gray-500">Please upload a CSV file to view the performance dashboard.</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ------------------------- Mount React app -------------------------
+    ReactDOM.render(<PerformanceDashboard />, document.getElementById('root'));
+  </script>
+</body>
+</html>
