@@ -2,11 +2,13 @@ package ipfs
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math"
 	"math/rand"
 	"os"
+	"sync"
 	"time"
 
 	shell "github.com/ipfs/go-ipfs-api"
@@ -16,35 +18,62 @@ import (
 type IPFSClient struct {
 	shell           *shell.Shell
 	developmentMode bool
+	addSemaphore    chan struct{} // Limit concurrent Add operations
+	getSemaphore    chan struct{} // Limit concurrent Get operations
+	pinMutex        sync.Mutex    // For pin/unpin operations
 }
 
 // NewIPFSClient creates a new IPFS client
 func NewIPFSClient(apiURL string, developmentMode bool) *IPFSClient {
+	const maxConcurrent = 30 // Default to 30 concurrent operations
+
+	shell := shell.NewShell(apiURL)
+	shell.SetTimeout(60 * time.Second) // Set a timeout for all operations
+
 	return &IPFSClient{
-		shell:           shell.NewShell(apiURL),
+		shell:           shell,
 		developmentMode: developmentMode,
+		addSemaphore:    make(chan struct{}, maxConcurrent),
+		getSemaphore:    make(chan struct{}, maxConcurrent*2), // Allow more concurrent reads
 	}
 }
 
 // AddFile adds a file to IPFS and returns its CID
 func (c *IPFSClient) AddFile(fileContent []byte) (string, error) {
+	// Acquire semaphore
+	select {
+	case c.addSemaphore <- struct{}{}:
+		// Acquired semaphore, proceed
+		defer func() { <-c.addSemaphore }() // Release when done
+	case <-time.After(10 * time.Second):
+		return "", fmt.Errorf("timed out waiting for IPFS add semaphore")
+	}
+
 	fmt.Printf("DEBUG: Adding file to IPFS, size: %d bytes\n", len(fileContent))
 	cid, err := c.shell.Add(bytes.NewReader(fileContent))
 	if err != nil {
 		fmt.Printf("DEBUG: Failed to add file to IPFS: %v\n", err)
 		return "", fmt.Errorf("failed to add file to IPFS: %w", err)
 	}
+
 	fmt.Printf("DEBUG: Successfully added file to IPFS with CID: %s\n", cid)
 
 	// In non-development mode, pin the file to ensure it persists
 	if !c.developmentMode {
 		fmt.Printf("DEBUG: Attempting to pin CID: %s\n", cid)
-		err = c.shell.Pin(cid)
-		if err != nil {
-			fmt.Printf("WARNING: Failed to pin file: %v\n", err)
-		} else {
-			fmt.Printf("DEBUG: Successfully pinned CID: %s\n", cid)
-		}
+
+		// Use a separate goroutine for pinning to not block the response
+		go func(cid string) {
+			c.pinMutex.Lock()
+			defer c.pinMutex.Unlock()
+
+			err := c.shell.Pin(cid)
+			if err != nil {
+				fmt.Printf("WARNING: Failed to pin file: %v\n", err)
+			} else {
+				fmt.Printf("DEBUG: Successfully pinned CID: %s\n", cid)
+			}
+		}(cid)
 	}
 
 	return cid, nil
@@ -52,27 +81,43 @@ func (c *IPFSClient) AddFile(fileContent []byte) (string, error) {
 
 // GetFile retrieves a file from IPFS by its CID with exponential backoff
 func (c *IPFSClient) GetFile(cid string) ([]byte, error) {
+	// Acquire semaphore (timeout after 5s)
+	select {
+	case c.getSemaphore <- struct{}{}:
+		defer func() { <-c.getSemaphore }()
+	case <-time.After(5 * time.Second):
+		return nil, fmt.Errorf("timed out waiting for IPFS get semaphore")
+	}
+
 	fmt.Printf("DEBUG: Retrieving file from IPFS with CID: %s\n", cid)
 
-	var content []byte
+	// Overall timeout for all retries
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	const (
+		maxRetries = 5
+		baseDelay  = 100 * time.Millisecond
+	)
+
 	var lastErr error
-
-	// Retry configuration
-	maxRetries := 5
-	baseDelay := 100 * time.Millisecond
-
 	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Before retrying (not on first try), wait with exponential backoff + jitter
 		if attempt > 0 {
-			// Calculate backoff with jitter
-			delay := baseDelay * time.Duration(math.Pow(2, float64(attempt)))
-			jitter := time.Duration(rand.Float64() * 0.4 * float64(delay))
-			delay = delay + jitter - (jitter / 2) // ±20% symmetric distribution
-
+			backoff := baseDelay * time.Duration(math.Pow(2, float64(attempt)))
+			jitter := time.Duration(rand.Float64() * 0.4 * float64(backoff))
+			delay := backoff + jitter - (jitter / 2) // ±20% symmetric
 			fmt.Printf("DEBUG: Attempt %d failed, retrying after %v\n", attempt, delay)
-			time.Sleep(delay)
+
+			select {
+			case <-time.After(delay):
+				// continue to next attempt
+			case <-ctx.Done():
+				return nil, fmt.Errorf("IPFS get operation timed out after %s: %w", ctx.Err(), lastErr)
+			}
 		}
 
-		// Use Cat method to retrieve the file
+		// Try to Cat
 		reader, err := c.shell.Cat(cid)
 		if err != nil {
 			lastErr = fmt.Errorf("IPFS Cat failed on attempt %d: %w", attempt+1, err)
@@ -80,10 +125,9 @@ func (c *IPFSClient) GetFile(cid string) ([]byte, error) {
 			continue
 		}
 
-		// Read the content from the reader
-		content, err = io.ReadAll(reader)
+		// Read all content
+		content, err := io.ReadAll(reader)
 		reader.Close()
-
 		if err != nil {
 			lastErr = fmt.Errorf("failed to read from IPFS stream on attempt %d: %w", attempt+1, err)
 			fmt.Printf("DEBUG: %v\n", lastErr)
@@ -91,12 +135,60 @@ func (c *IPFSClient) GetFile(cid string) ([]byte, error) {
 		}
 
 		// Success!
-		fmt.Printf("DEBUG: Successfully read %d bytes from IPFS for CID: %s after %d attempt(s)\n",
+		fmt.Printf("DEBUG: Successfully read %d bytes from IPFS for CID %s on attempt %d\n",
 			len(content), cid, attempt+1)
 		return content, nil
 	}
 
 	return nil, fmt.Errorf("failed to retrieve file after %d attempts: %w", maxRetries, lastErr)
+}
+
+func (c *IPFSClient) AddLargeFile(fileContent []byte) (string, error) {
+	// Acquire semaphore
+	select {
+	case c.addSemaphore <- struct{}{}:
+		defer func() { <-c.addSemaphore }()
+	case <-time.After(10 * time.Second):
+		return "", fmt.Errorf("timed out waiting for IPFS add semaphore")
+	}
+
+	fmt.Printf("DEBUG: Adding file to IPFS, size: %d bytes\n", len(fileContent))
+
+	// Build AddOpts: pin if not in dev, and chunk at 256KiB
+	addOpts := []shell.AddOpts{
+		shell.Pin(!c.developmentMode),
+		func(rb *shell.RequestBuilder) error {
+			rb.Option("chunker", "size-256k")
+			return nil
+		},
+	}
+
+	// Call the Add method
+	cid, err := c.shell.Add(bytes.NewReader(fileContent), addOpts...)
+	if err != nil {
+		fmt.Printf("DEBUG: Failed to add file to IPFS: %v\n", err)
+		return "", fmt.Errorf("failed to add file to IPFS: %w", err)
+	}
+
+	fmt.Printf("DEBUG: Successfully added file to IPFS with CID: %s\n", cid)
+
+	if !c.developmentMode {
+		go func(cid string) {
+			c.pinMutex.Lock()
+			defer c.pinMutex.Unlock()
+
+			pins, err := c.shell.Pins()
+			if err != nil {
+				fmt.Printf("WARNING: failed to list pins: %v\n", err)
+			} else if _, ok := pins[cid]; !ok {
+				fmt.Printf("WARNING: CID %s not found among pins\n", cid)
+			} else {
+				fmt.Printf("DEBUG: Successfully confirmed pin for CID: %s\n", cid)
+			}
+		}(cid)
+	}
+
+	return cid, nil
 }
 
 // PinFile pins a file in IPFS to ensure it persists

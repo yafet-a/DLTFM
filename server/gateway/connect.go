@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/hyperledger/fabric-gateway/pkg/client"
 	"github.com/hyperledger/fabric-gateway/pkg/identity"
@@ -18,6 +20,11 @@ func getFabricSamplesDir() string {
 	// Assuming we're in the server directory, go up one level and then to fabric-samples
 	return filepath.Join("..", "fabric-samples")
 }
+
+var (
+	connectionPool     = make(map[string]*grpc.ClientConn)
+	connectionPoolLock sync.RWMutex
+)
 
 type OrgConfig struct {
 	MSPID      string
@@ -42,35 +49,69 @@ func getOrgConfig(mspID string) OrgConfig {
 	}
 }
 
+func GetConnection(orgConfig OrgConfig) (*grpc.ClientConn, error) {
+	connectionKey := fmt.Sprintf("%s-%s", orgConfig.MSPID, orgConfig.PeerPort)
+
+	// Check if connection exists
+	connectionPoolLock.RLock()
+	conn, exists := connectionPool[connectionKey]
+	connectionPoolLock.RUnlock()
+
+	if exists {
+		return conn, nil
+	}
+
+	// Create new connection
+	connectionPoolLock.Lock()
+	defer connectionPoolLock.Unlock()
+
+	// Check again after acquiring write lock
+	if conn, exists = connectionPool[connectionKey]; exists {
+		return conn, nil
+	}
+
+	// Create new connection
+	conn = newGrpcConnection(orgConfig)
+	connectionPool[connectionKey] = conn
+
+	return conn, nil
+}
+
 func Connect(mspID string) (*client.Gateway, error) {
 	fmt.Printf("Starting Gateway connection for MSP: %s\n", mspID)
 
 	orgConfig := getOrgConfig(mspID)
 
-	clientConnection := newGrpcConnection(orgConfig)
+	// Use connection pool
+	clientConnection, err := GetConnection(orgConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get gRPC connection: %w", err)
+	}
 	fmt.Println("gRPC connection established")
 
 	id, err := newIdentity(orgConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create identity: %w", err)
 	}
-	fmt.Println("Identity created")
 
 	sign, err := newSign(orgConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signer: %w", err)
 	}
-	fmt.Println("Signer created")
 
 	gw, err := client.Connect(
 		id,
 		client.WithSign(sign),
 		client.WithClientConnection(clientConnection),
+		client.WithEvaluateTimeout(30*time.Second),
+		client.WithEndorseTimeout(30*time.Second),
+		client.WithSubmitTimeout(30*time.Second),
+		client.WithCommitStatusTimeout(60*time.Second),
 	)
+
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("Gateway connection established successfully")
 
 	return gw, nil
 }

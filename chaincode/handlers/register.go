@@ -86,8 +86,8 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 		EndorsementType:  config.PolicyType,
 	}
 
-	// Set status to APPROVED if using ANY_ORG and submitter is in RequiredOrgs
-	if config.PolicyType == "ANY_ORG" && contains(config.RequiredOrgs, mspID) {
+	// Set status to APPROVED if using ANY_ORG
+	if config.PolicyType == "ANY_ORG" {
 		file.Status = "APPROVED"
 	}
 
@@ -114,14 +114,4 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 	}
 
 	return nil
-}
-
-// Helper function to check if a string is in a slice
-func contains(slice []string, str string) bool {
-	for _, s := range slice {
-		if s == str {
-			return true
-		}
-	}
-	return false
 }
