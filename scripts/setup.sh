@@ -142,7 +142,7 @@ deploy_chaincode() {
     # Define chaincode parameters
     CHAINCODE_NAME="chaincode"
     CHAINCODE_VERSION="1.0"
-    CHAINCODE_LABEL="${CHAINCODE_NAME}"
+    CHAINCODE_LABEL="${CHAINCODE_NAME}_${CHAINCODE_VERSION}"
     CHAINCODE_PATH="$SCRIPT_DIR/../chaincode/chaincode.tar.gz"
 
     # Verify chaincode package exists

@@ -17,8 +17,8 @@ const ORG_ID = '4638c8ac-8fff-42d0-8590-cb6f80e61f07';
 const results = [];
 
 // Test configuration
-const TEST_ITERATIONS = 10;  // Number of times to run each test
-const CONCURRENT_BATCH_SIZES = [1, 5, 10, 15, 20, 25]; // Different batch sizes for concurrent test
+const TEST_ITERATIONS = 15;  // Number of times to run each test
+const CONCURRENT_BATCH_SIZES = [1, 5, 10, 15, 20, 25, 30]; // Different batch sizes for concurrent test
 
 let authToken = '';
 const fileIds = [];
@@ -115,6 +115,29 @@ afterAll(() => {
   
   // Save results to CSV
   saveResultsToCSV();
+
+  // === compute ops/min ===
+  if (results.length) {
+    // 1) sort by timestamp
+    const times = results
+      .map(r => new Date(r.timestamp).getTime())
+      .sort((a, b) => a - b);
+    const spanMs = times[times.length - 1] - times[0];
+    const spanMin = spanMs / 60000 || 1/60;  // avoid zero-divide
+
+    // 2) count per operation
+    const counts = results.reduce((acc, { operation }) => {
+      acc[operation] = (acc[operation] || 0) + 1;
+      return acc;
+    }, {});
+
+    // 3) compute and log ops/min
+    console.log('\n=== Operations per minute ===');
+    Object.entries(counts).forEach(([op, cnt]) => {
+      const rate = (cnt / spanMin).toFixed(2);
+      console.log(`${op.padEnd(20)} : ${cnt} total → ${rate} op/min`);
+    });
+  }
 });
 
 /**************************************************
@@ -323,7 +346,7 @@ describe('Performance Benchmarking', () => {
         // Don't fail the test if server has issues
         console.warn("Skipping approval test due to server error");
       }
-    }, 30000); // Add timeout here too
+    }, 200000); // Timeout here
   });
   
   
