@@ -13,30 +13,6 @@ DLTFM is a prototype for a secure, enterprise-grade file management system built
 - **User-friendly web interface**: Modern React-based UI with responsive design
 - **Authentication**: Secure user authentication via Supabase
 
-## Architecture
-
-![image](https://github.com/user-attachments/assets/5d48f311-6787-4e35-b68a-085be046190e)
-
-
-DLTFM consists of three major components:
-
-### 1. Blockchain Network
-- Hyperledger Fabric test-network with multiple organizations
-- Custom chaincode (smart contracts) written in Go
-- Chaincode functions for file registration (including versioning), approvals, and queries
-
-### 2. Backend Server
-- Go-based API server using Gin framework
-- Gateway connections to Hyperledger Fabric
-- IPFS client for distributed content storage
-- Supabase integration for authentication and user management
-
-### 3. Web Frontend
-- React-based single-page application
-- Modern UI components using shadcn/ui
-- Authentication context and organization management
-- Real-time file status updates
-
 ## Prerequisites
 
 - Go 1.23+
