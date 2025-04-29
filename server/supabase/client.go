@@ -44,7 +44,6 @@ type UserOrganization struct {
 	Org    Organization `json:"organizations"`
 }
 
-// Add this new method to your Client struct
 func (c *Client) GetUserOrganizations(userID string) ([]Organization, error) {
 	req, err := http.NewRequest("GET",
 		fmt.Sprintf("%s/rest/v1/user_organizations?user_id=eq.%s&select=organizations(*)", c.projectURL, userID),

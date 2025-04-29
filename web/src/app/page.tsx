@@ -549,7 +549,7 @@ export default function Home() {
           versions={getFileVersions(selectedVersionFile)}
           open={true}
           onClose={() => setSelectedVersionFile(null)}
-          onRefresh={loadFiles} // Add this line to allow refreshing after restore
+          onRefresh={loadFiles} // Allows refreshing after restore
         />
       )}
     </div>

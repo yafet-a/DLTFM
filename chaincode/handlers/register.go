@@ -29,7 +29,7 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 		return fmt.Errorf("invalid policy type: %s", config.PolicyType)
 	}
 
-	// Note: We no longer compute the hash of the content here as it's not available.
+	// Architectural Note: We no longer compute the hash of the content here as it's not available.
 	// Instead, we'll store the IPFS CID which already serves as a content hash.
 	hash := ipfsCID // IPFS CID is already a content-addressed hash
 	fmt.Printf("DEBUG: Using IPFS CID as hash: %s\n", hash)
@@ -79,7 +79,7 @@ func RegisterFile(ctx contractapi.TransactionContextInterface, id string, name s
 		Metadata:         metadata,
 		Version:          newVersion,
 		PreviousID:       previousID,
-		IPFSLocation:     ipfsCID, // Store IPFS CID instead of content
+		IPFSLocation:     ipfsCID,
 		Status:           "PENDING",
 		RequiredOrgs:     config.RequiredOrgs,
 		CurrentApprovals: initialApprovals,

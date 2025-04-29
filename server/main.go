@@ -62,7 +62,7 @@ func startChaincodeWorkerPool(workerCount int, gatewayManager *GatewayManager) (
 
 			for task := range taskQueue {
 				// Get MSP from request context or use a default
-				mspID := "Org1MSP" // You might need to modify this to get the right MSP
+				mspID := "Org1MSP"
 
 				// Get gateway connection
 				gw, err := gatewayManager.GetGateway(mspID)
@@ -606,7 +606,7 @@ func main() {
 						return
 					}
 
-					// Upload to IPFS (using your existing worker pool)
+					// Upload to IPFS via the worker pool
 					ipfsResultChan := make(chan string, 1)
 					ipfsErrorChan := make(chan error, 1)
 
@@ -651,7 +651,7 @@ func main() {
 				results = append(results, result)
 			}
 
-			// Now that we have all files uploaded to IPFS, register them in a single blockchain transaction
+			// Now that we have all files uploaded to IPFS -> we can register them to the blockchain
 			if len(results) > 0 {
 				batchItems := make([]map[string]interface{}, 0)
 

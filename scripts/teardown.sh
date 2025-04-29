@@ -68,6 +68,3 @@ while true; do
             ;;
     esac
 done
-
-# Add API call to unpin files from Pinata
-curl -X DELETE ... # Unpin API endpoint

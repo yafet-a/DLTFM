@@ -132,7 +132,7 @@ function calculateThroughput(fileSize, durationMs) {
 }
 
 /**
- * Create improved file upload performance visualization grouped by file name (assuming name indicates size category)
+ * Upload performance visualisation grouped by file name
  */
 function createFileUploadSizeChart(data, outputDir) {
   // Filter file uploads with valid duration and size
@@ -155,7 +155,7 @@ function createFileUploadSizeChart(data, outputDir) {
       fileUploadsByName[item.filename] = {
           durations: [],
           throughputs: [],
-          size: item.fileSize // Assuming size is consistent for the same filename
+          size: item.fileSize
       };
     }
     fileUploadsByName[item.filename].durations.push(item.duration);
@@ -1311,12 +1311,7 @@ function createPerformanceDashboard(data, outputDir) {
            }
         }
       },
-      // Ensure the main y-axis labels (operation names) are displayed correctly
-      // The 'yDuration' axis ticks callback now handles displaying the names.
-       // Remove the primary 'y' axis scale definition if not needed
-       // scales: { y: { display: false } } // Or adjust as needed
-       // The default y axis will show labels if not overridden by another axis with position:'left'
-       // Let's keep the default 'y' axis for labels and have 'yDuration' share it
+
       scales: {
           x: {}, // Value axis
           y: { // Operation names axis
@@ -1326,7 +1321,6 @@ function createPerformanceDashboard(data, outputDir) {
               type: 'logarithmic',
               position: 'left',
               title: { display: true, text: 'Avg Duration (ms) - Log Scale' },
-              // No ticks needed here, 'y' axis handles labels
           },
           yCount: {
               type: 'linear',
@@ -1432,7 +1426,7 @@ function createSummaryReport(data, outputDir) {
                 uploadsByName[item.filename] = {
                     count: 0,
                     totalDuration: 0,
-                    totalSize: 0, // Assume size is consistent, take first
+                    totalSize: 0,
                     fileSize: item.fileSize
                 };
              }

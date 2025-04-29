@@ -10,7 +10,6 @@ interface FileTableProps {
   onApproveFile: (fileId: string) => Promise<void>;
 }
 
-// Wrap the component definition with React.memo
 const FileTable = memo(({ files, onViewHistory, onApproveFile }: FileTableProps) => {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -20,7 +19,7 @@ const FileTable = memo(({ files, onViewHistory, onApproveFile }: FileTableProps)
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'APPROVED' | 'PENDING'>('ALL');
   const { currentOrg } = useOrg();
 
-  // Function to cycle through filter states (remains the same)
+  // Function to cycle through filter states
   const cycleStatusFilter = () => {
     setStatusFilter(current => {
       switch (current) {
@@ -34,9 +33,9 @@ const FileTable = memo(({ files, onViewHistory, onApproveFile }: FileTableProps)
 
   // Memoise the file grouping calculation
   const fileGroups = useMemo(() => {
-    console.log("Recalculating file groups..."); // Add console log for debugging memoization
+    console.log("Recalculating file groups...");
     const groups = new Map<string, BlockchainFile[]>();
-    const fileMap = new Map(files.map(f => [f.id, f])); // Create a map for faster lookups
+    const fileMap = new Map(files.map(f => [f.id, f])); // map for faster lookups
 
     files.forEach(file => {
         let rootID = file.id;
@@ -51,9 +50,7 @@ const FileTable = memo(({ files, onViewHistory, onApproveFile }: FileTableProps)
                 rootID = currentFile.previousID;
                 currentFile = previousFile;
             } else {
-                // If previous file is not in the list, stop traversal and use current as root for this branch
-                // This handles cases where the history might be incomplete in the input `files` array
-                 rootID = currentFile.id; // Or keep the last known valid rootID? Depends on desired behaviour. Let's stick with the current file's ID as the effective root for this entry.
+                 rootID = currentFile.id; 
                  break;
             }
         }
@@ -63,7 +60,7 @@ const FileTable = memo(({ files, onViewHistory, onApproveFile }: FileTableProps)
             groups.set(rootID, []);
         }
         const group = groups.get(rootID)!;
-         // Ensure the file isn't already added (safeguard against potential duplicates if logic above has edge cases)
+         // safeguard against potential duplicates if logic above has edge cases
          if (!group.some(f => f.id === file.id)) {
              group.push(file);
          }
@@ -134,8 +131,6 @@ const FileTable = memo(({ files, onViewHistory, onApproveFile }: FileTableProps)
   }, []); // No dependencies needed as setExpandedGroups is stable
 
 
-  // renderDropdown can remain as is, defined within the component body.
-  // It will be recreated on renders, but its complexity doesn't warrant memoisation unless profiling shows it's a problem.
   // Dependencies: currentOrg, approvingFiles, onApproveFile, setApprovingFiles, setOpenDropdown, onViewHistory, setPreviewFile
   const renderDropdown = (file: BlockchainFile, isBottom: boolean) => (
     <div
@@ -219,9 +214,7 @@ const FileTable = memo(({ files, onViewHistory, onApproveFile }: FileTableProps)
   );
 
 
-  // renderFileGroup also remains as is for now. Memoising it with useCallback
-  // would require a large dependency array (expandedGroups, toggleGroup, openDropdown, setOpenDropdown, renderDropdown, etc.)
-  // which might negate the benefits. The primary optimization comes from memoizing the data processing above.
+  // Memoise the renderFileGroup function
   // Dependencies: expandedGroups, toggleGroup, openDropdown, setOpenDropdown, renderDropdown
   const renderFileGroup = (rootID: string, groupFiles: BlockchainFile[]) => {
       const latestFile = groupFiles[0]; // The latest version is always first
@@ -231,9 +224,7 @@ const FileTable = memo(({ files, onViewHistory, onApproveFile }: FileTableProps)
       return (
           <>
               {showFiles.map((file, index) => {
-                  // Determine if this row is near the bottom of the table/viewport to adjust dropdown position
-                  // This is a simplified check; a more robust solution might involve measuring element positions.
-                  // For now, we'll approximate based on index within the displayed group.
+
                   const isPotentiallyBottom = index >= showFiles.length - 1; // Or a more fixed number like index > 5
 
                   return (
@@ -331,7 +322,6 @@ const FileTable = memo(({ files, onViewHistory, onApproveFile }: FileTableProps)
               {/* Render invisible content for accessibility if group is collapsed */}
                {!isExpanded && groupFiles.length > 1 && (
                    <div id={`group-${rootID}`} className="hidden">
-                       {/* You could put simplified content here if needed for screen readers */}
                        Collapsed content for {groupFiles[0].name} - {groupFiles.length - 1} older versions.
                    </div>
                )}

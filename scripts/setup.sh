@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Colors for output
+# Output colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -27,7 +27,7 @@ show_setup_menu() {
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 FABRIC_SAMPLES_DIR=$(cd "$SCRIPT_DIR/../fabric-samples" && pwd)
 
-# Function to log messages
+# Log messages
 log() {
     local level=$1
     local message=$2
@@ -40,7 +40,7 @@ log() {
     esac
 }
 
-# Function to show progress
+# Progress for long-running tasks
 show_progress() {
     echo "→ $1"
 }
@@ -89,7 +89,7 @@ setup_network() {
         fi
     fi
 
-    # Ask user if they want to use BFT
+    # Ask user if they want to use BFT, if no then -> use Raft
     read -p "Use SmartBFT ordering service? (y/n): " -n 1 -r
     echo
 

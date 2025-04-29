@@ -80,7 +80,6 @@ export function EndorsementWizard({ onSubmit, onCancel }: EndorsementWizardProps
                 if (config.requiredOrgs.length === 0) {
                     finalPolicy = "ANY_ORG";
                     finalRequiredOrgs = [currentOrgMSP];
-                    // You could show a toast notification here explaining the switch
                 } else {
                     finalRequiredOrgs = [currentOrgMSP, ...config.requiredOrgs];
                 }
@@ -92,10 +91,6 @@ export function EndorsementWizard({ onSubmit, onCancel }: EndorsementWizardProps
             policyType: finalPolicy,
             requiredOrgs: finalRequiredOrgs,
         });
-        
-        // Note: We don't reset isSubmitting here as the component will likely be unmounted
-        // after submission. If the component remains mounted, the parent should handle
-        // resetting the wizard state.
     };
 
     return (

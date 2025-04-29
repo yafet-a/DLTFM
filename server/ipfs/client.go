@@ -57,7 +57,7 @@ func (c *IPFSClient) AddFile(fileContent []byte) (string, error) {
 
 	fmt.Printf("DEBUG: Successfully added file to IPFS with CID: %s\n", cid)
 
-	// In non-development mode, pin the file to ensure it persists
+	// In non-development mode, we pin the file to ensure it persists
 	if !c.developmentMode {
 		fmt.Printf("DEBUG: Attempting to pin CID: %s\n", cid)
 
@@ -105,7 +105,7 @@ func (c *IPFSClient) GetFile(cid string) ([]byte, error) {
 		if a > 0 {
 			d := baseDelay << a // Bit-shift for geometric sequence
 			j := time.Duration(rand.Float64() * 0.4 * float64(d))
-			delay := d + j - (j / 2) // ±20% symmetric
+			delay := d + j - (j / 2) // +-20% symmetric
 			fmt.Printf("DEBUG: Attempt %d failed, retrying after %v\n", a, delay)
 
 			select {

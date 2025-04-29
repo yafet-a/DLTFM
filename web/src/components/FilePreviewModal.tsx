@@ -39,7 +39,7 @@ const FilePreviewModal = ({ file, onClose }: FilePreviewModalProps) => {
   const isText = metadata.type?.includes('text') || metadata.type?.includes('json');
   const isPDF = metadata.type === 'application/pdf';
 
-  // Direct IPFS gateway URL (use this to bypass your server if needed)
+  // Direct IPFS gateway URL (can be used to debug IPFS retrieval by bypassing the server)
   const ipfsGatewayUrl = `http://localhost:8088/ipfs/${file.ipfsLocation}`;
   
   // Server proxy URL

@@ -17,7 +17,7 @@ import (
 
 // Get the directory of fabric-samples relative to server directory
 func getFabricSamplesDir() string {
-	// Assuming we're in the server directory, go up one level and then to fabric-samples
+	// Go up one level and then to fabric-samples
 	return filepath.Join("..", "fabric-samples")
 }
 
