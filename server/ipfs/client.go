@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"math/rand"
 	"os"
 	"sync"
@@ -101,13 +100,13 @@ func (c *IPFSClient) GetFile(cid string) ([]byte, error) {
 	)
 
 	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for a := 0; a < maxRetries; a++ {
 		// Before retrying (not on first try), wait with exponential backoff + jitter
-		if attempt > 0 {
-			backoff := baseDelay * time.Duration(math.Pow(2, float64(attempt)))
-			jitter := time.Duration(rand.Float64() * 0.4 * float64(backoff))
-			delay := backoff + jitter - (jitter / 2) // ±20% symmetric
-			fmt.Printf("DEBUG: Attempt %d failed, retrying after %v\n", attempt, delay)
+		if a > 0 {
+			d := baseDelay << a // Bit-shift for geometric sequence
+			j := time.Duration(rand.Float64() * 0.4 * float64(d))
+			delay := d + j - (j / 2) // ±20% symmetric
+			fmt.Printf("DEBUG: Attempt %d failed, retrying after %v\n", a, delay)
 
 			select {
 			case <-time.After(delay):
@@ -120,7 +119,7 @@ func (c *IPFSClient) GetFile(cid string) ([]byte, error) {
 		// Try to Cat
 		reader, err := c.shell.Cat(cid)
 		if err != nil {
-			lastErr = fmt.Errorf("IPFS Cat failed on attempt %d: %w", attempt+1, err)
+			lastErr = fmt.Errorf("IPFS Cat failed on attempt %d: %w", a+1, err)
 			fmt.Printf("DEBUG: %v\n", lastErr)
 			continue
 		}
@@ -129,14 +128,14 @@ func (c *IPFSClient) GetFile(cid string) ([]byte, error) {
 		content, err := io.ReadAll(reader)
 		reader.Close()
 		if err != nil {
-			lastErr = fmt.Errorf("failed to read from IPFS stream on attempt %d: %w", attempt+1, err)
+			lastErr = fmt.Errorf("failed to read from IPFS stream on attempt %d: %w", a+1, err)
 			fmt.Printf("DEBUG: %v\n", lastErr)
 			continue
 		}
 
 		// Success!
 		fmt.Printf("DEBUG: Successfully read %d bytes from IPFS for CID %s on attempt %d\n",
-			len(content), cid, attempt+1)
+			len(content), cid, a+1)
 		return content, nil
 	}
 

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useOptimisticUpdate } from '@/hooks/useOptimisticUpdate'; 
 import { Check, ChevronDown, ChevronsUpDown, Upload, User } from 'lucide-react';
 import axios from 'axios';
 import type { File as BlockchainFile } from '@/types/file';
@@ -47,6 +48,8 @@ export default function Home() {
 //     policyType: "ALL_ORGS",
 //     requiredOrgs: [] as string[]
 // });
+
+
 
   const loadFiles = useCallback(async () => {
     if (!session || !currentOrg) return;

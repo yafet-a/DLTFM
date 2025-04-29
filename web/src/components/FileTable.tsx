@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { File as FileIcon, ChevronDown, History, Eye, Share, ChevronRight, Check } from 'lucide-react';
 import type { File as BlockchainFile } from '@/types/file';
 import FilePreviewModal from './FilePreviewModal';
@@ -10,17 +10,17 @@ interface FileTableProps {
   onApproveFile: (fileId: string) => Promise<void>;
 }
 
-const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
+// Wrap the component definition with React.memo
+const FileTable = memo(({ files, onViewHistory, onApproveFile }: FileTableProps) => {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [previewFile, setPreviewFile] = useState<BlockchainFile | null>(null);
   const [approvingFiles, setApprovingFiles] = useState<Set<string>>(new Set());
-  // Cycle through: ALL -> PENDING -> APPROVED -> ALL
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'APPROVED' | 'PENDING'>('ALL');
   const { currentOrg } = useOrg();
-  
-  // Function to cycle through filter states
+
+  // Function to cycle through filter states (remains the same)
   const cycleStatusFilter = () => {
     setStatusFilter(current => {
       switch (current) {
@@ -32,34 +32,83 @@ const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
     });
   };
 
-  // Group files by previousID for proper version tracking
-  const groupFilesByPreviousID = useCallback((files: BlockchainFile[]) => {
+  // Memoise the file grouping calculation
+  const fileGroups = useMemo(() => {
+    console.log("Recalculating file groups..."); // Add console log for debugging memoization
     const groups = new Map<string, BlockchainFile[]>();
-  
-    files.forEach(file => {
-      // Determine the root file by following the previousID chain
-      let rootID = file.id;
-      let currentFile = file;
-      while (currentFile.previousID) {
-        rootID = currentFile.previousID;
-        currentFile = files.find(f => f.id === currentFile.previousID) || file;
-      }
-  
-      // Group all versions under the root file
-      if (!groups.has(rootID)) {
-        groups.set(rootID, []);
-      }
-      const group = groups.get(rootID)!;
-      group.push(file);
-      groups.set(rootID, group.sort((a, b) => b.version - a.version)); // Sort by version descending
-    });
-  
-    return groups;
-  }, []);
-  
-  const fileGroups = groupFilesByPreviousID(files);
+    const fileMap = new Map(files.map(f => [f.id, f])); // Create a map for faster lookups
 
-  // Close dropdown when clicking outside
+    files.forEach(file => {
+        let rootID = file.id;
+        let currentFile: BlockchainFile | undefined = file;
+        const visited = new Set<string>(); // Prevent infinite loops in case of cyclic references
+
+        // Traverse up the chain to find the rootID
+        while (currentFile?.previousID && !visited.has(currentFile.id)) {
+            visited.add(currentFile.id);
+            const previousFile = fileMap.get(currentFile.previousID);
+            if (previousFile) {
+                rootID = currentFile.previousID;
+                currentFile = previousFile;
+            } else {
+                // If previous file is not in the list, stop traversal and use current as root for this branch
+                // This handles cases where the history might be incomplete in the input `files` array
+                 rootID = currentFile.id; // Or keep the last known valid rootID? Depends on desired behaviour. Let's stick with the current file's ID as the effective root for this entry.
+                 break;
+            }
+        }
+
+        // Group all versions under the determined root file ID
+        if (!groups.has(rootID)) {
+            groups.set(rootID, []);
+        }
+        const group = groups.get(rootID)!;
+         // Ensure the file isn't already added (safeguard against potential duplicates if logic above has edge cases)
+         if (!group.some(f => f.id === file.id)) {
+             group.push(file);
+         }
+    });
+
+    // Sort each group by version descending after grouping is complete
+    groups.forEach((group, rootID) => {
+        groups.set(rootID, group.sort((a, b) => b.version - a.version));
+    });
+
+
+    return groups;
+  }, [files]); // Dependency: Only recalculate when 'files' prop changes
+
+  // Memoise the sorting of file groups
+  const sortedFileGroups = useMemo(() => {
+    return Array.from(fileGroups.entries()).sort((a, b) => {
+      // Each group is already sorted by version (newest first)
+      // So we can just compare the timestamp of the first file (latest version) in each group
+      const latestA = a[1]?.[0];
+      const latestB = b[1]?.[0];
+
+      // Handle potential empty groups or missing timestamps gracefully
+      if (!latestA || !latestB) return 0;
+
+      // Sort in descending order (newest first)
+      return new Date(latestB.timestamp).getTime() - new Date(latestA.timestamp).getTime();
+    });
+  }, [fileGroups]); // Dependency: Recalculate when fileGroups changes
+
+  // Memoise the filtering of file groups
+  const filteredFileGroups = useMemo(() => {
+    return sortedFileGroups.filter(([_, groupFiles]) => {
+      if (statusFilter === 'ALL') return true;
+
+      // Check the status of the latest file in the group
+      const latestFile = groupFiles?.[0];
+      if (!latestFile) return false; // Should not happen if groups are well-formed
+
+      return statusFilter === latestFile.status;
+    });
+  }, [sortedFileGroups, statusFilter]); // Dependencies: Recalculate when sorted groups or filter changes
+
+
+  // Close dropdown when clicking outside (remains the same)
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -69,9 +118,10 @@ const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, []); // Empty dependency array means this effect runs once on mount
 
-  const toggleGroup = (rootID: string) => {
+  // Memoise toggleGroup function
+  const toggleGroup = useCallback((rootID: string) => {
     setExpandedGroups(prev => {
       const next = new Set(prev);
       if (next.has(rootID)) {
@@ -81,16 +131,23 @@ const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
       }
       return next;
     });
-  };
-  
+  }, []); // No dependencies needed as setExpandedGroups is stable
+
+
+  // renderDropdown can remain as is, defined within the component body.
+  // It will be recreated on renders, but its complexity doesn't warrant memoisation unless profiling shows it's a problem.
+  // Dependencies: currentOrg, approvingFiles, onApproveFile, setApprovingFiles, setOpenDropdown, onViewHistory, setPreviewFile
   const renderDropdown = (file: BlockchainFile, isBottom: boolean) => (
     <div
       className="fixed z-50 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 divide-y divide-gray-100 focus:outline-none"
       style={{
         position: 'absolute',
-        bottom: '100%',
+        bottom: isBottom ? 'unset' : '100%', // Adjust position based on isBottom
+        top: isBottom ? '100%' : 'unset',
         right: 0,
-        zIndex: 100
+        zIndex: 100,
+        marginTop: isBottom ? '0.5rem' : '0', // Add some margin if dropdown is below
+        marginBottom: isBottom ? '0' : '0.5rem' // Add some margin if dropdown is above
       }}
       ref={dropdownRef}
     >
@@ -98,7 +155,7 @@ const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
         {/* Only show Approve button if file is pending and not already approved by current org */}
         {file.status === "PENDING" && currentOrg && !file.currentApprovals.includes(currentOrg.fabric_msp_id) && (
           <button
-            className="group flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 w-full"
+            className="group flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 w-full disabled:opacity-50"
             disabled={approvingFiles.has(file.id)}
             onClick={async () => {
               try {
@@ -107,6 +164,7 @@ const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
                 setOpenDropdown(null);
               } catch (error) {
                 console.error("Failed to approve file:", error);
+                 // Optionally: show an error message to the user
               } finally {
                 setApprovingFiles(prev => {
                   const updated = new Set(prev);
@@ -135,7 +193,7 @@ const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
         <button
           className="group flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-gray-900 w-full"
           onClick={() => {
-            setOpenDropdown(null);  // Close the dropdown first
+            setOpenDropdown(null); // Close the dropdown first
             onViewHistory(file);    // Then call the parent callback
           }}
         >
@@ -160,119 +218,126 @@ const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
     </div>
   );
 
+
+  // renderFileGroup also remains as is for now. Memoising it with useCallback
+  // would require a large dependency array (expandedGroups, toggleGroup, openDropdown, setOpenDropdown, renderDropdown, etc.)
+  // which might negate the benefits. The primary optimization comes from memoizing the data processing above.
+  // Dependencies: expandedGroups, toggleGroup, openDropdown, setOpenDropdown, renderDropdown
   const renderFileGroup = (rootID: string, groupFiles: BlockchainFile[]) => {
-    const latestFile = groupFiles[0]; // The latest version is always first
-    const isExpanded = expandedGroups.has(rootID);
-    const showFiles = isExpanded ? groupFiles : [latestFile];
-  
-    return (
-      <>
-        {showFiles.map((file, index) => (
-          <tr key={file.id} className={`${index > 0 ? 'bg-gray-50/50' : ''}`}>
-            <td className="px-6 py-4 whitespace-nowrap">
-              <div className="flex items-center">
-                {/* Expansion button */}
-                <span className="w-4 inline-flex justify-center">
-                  {index === 0 && groupFiles.length > 1 ? (
-                    <button
-                      onClick={() => toggleGroup(rootID)}
-                      className="p-1 hover:bg-gray-100 rounded transition-colors"
-                    >
-                      <ChevronRight
-                        size={16}
-                        className={`transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                      />
-                    </button>
-                  ) : null}
-                </span>
-                
-                {/* Add indentation for child items */}
-                {index > 0 && <div className="w-5"></div>}
-                
-                <FileIcon size={20} className={`text-gray-400 mr-2 ${index > 0 ? 'opacity-60' : ''}`} />
-                <div>
-                  <div className={`text-sm font-medium flex items-center ${index > 0 ? 'text-gray-600 opacity-60' : 'text-gray-900'}`}>
-                    {file.name}
-                    {index === 0 && groupFiles.length > 1 && (
-                      <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
-                        Latest Version
-                      </span>
-                    )}
-                  </div>
-                  <div className={`text-sm text-gray-500 font-mono ${index > 0 ? 'opacity-60' : ''}`}>
-                    {file.ipfsLocation ? (
-                      <>CID: {file.ipfsLocation.substring(0, 16)}...</>
-                    ) : (
-                      <>ID: {file.id.substring(0, 8)}...</>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </td>
-            <td className={`px-6 py-4 whitespace-nowrap text-sm text-gray-500 ${index > 0 ? 'opacity-60' : ''}`}>{file.owner}</td>
-            <td className="px-6 py-4 whitespace-nowrap">
-              <div className={`text-sm text-gray-900 ${index > 0 ? 'opacity-60' : ''}`}>v{file.version}</div>
-              {file.previousID && (
-                <div className="text-xs text-gray-500">Updated from v{file.version - 1}</div>
-              )}
-            </td>
-            <td className={`px-6 py-4 whitespace-nowrap text-sm text-gray-500 ${index > 0 ? 'opacity-60' : ''}`}>
-              {new Date(file.timestamp).toLocaleString()}
-            </td>
-            <td className="px-6 py-4 whitespace-nowrap">
-              <div className={`flex items-center space-x-2 ${index > 0 ? 'opacity-60' : ''}`}>
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                  file.status === 'APPROVED' 
-                    ? 'bg-green-100 text-green-800' 
-                    : 'bg-yellow-100 text-yellow-800'
-                }`}>
-                  {file.status}
-                </span>
-                {file.status === 'PENDING' && (
-                  <span className="text-xs text-gray-500">
-                    {file.currentApprovals.length}/{file.requiredOrgs.length} approvals
-                  </span>
-                )}
-              </div>
-            </td>
-            <td className={`px-6 py-4 whitespace-nowrap text-sm text-gray-500 relative ${index > 0 ? 'opacity-60' : ''}`}>
-              <div className="relative inline-block text-left">
-                <button
-                  className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  onClick={() => setOpenDropdown(openDropdown === file.id ? null : file.id)}
-                >
-                  Actions
-                  <ChevronDown size={16} className="ml-2" />
-                </button>
-  
-                {openDropdown === file.id && renderDropdown(file, index >= groupFiles.length - 2)}
-              </div>
-            </td>
-          </tr>
-        ))}
-      </>
-    );
+      const latestFile = groupFiles[0]; // The latest version is always first
+      const isExpanded = expandedGroups.has(rootID);
+      const showFiles = isExpanded ? groupFiles : [latestFile];
+
+      return (
+          <>
+              {showFiles.map((file, index) => {
+                  // Determine if this row is near the bottom of the table/viewport to adjust dropdown position
+                  // This is a simplified check; a more robust solution might involve measuring element positions.
+                  // For now, we'll approximate based on index within the displayed group.
+                  const isPotentiallyBottom = index >= showFiles.length - 1; // Or a more fixed number like index > 5
+
+                  return (
+                      <tr key={file.id} className={`${index > 0 ? 'bg-gray-50/50' : ''}`}>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center">
+                                  {/* Expansion button */}
+                                  <span className="w-4 inline-flex justify-center">
+                                      {index === 0 && groupFiles.length > 1 ? (
+                                          <button
+                                              onClick={() => toggleGroup(rootID)}
+                                              className="p-1 hover:bg-gray-100 rounded transition-colors"
+                                              aria-expanded={isExpanded}
+                                              aria-controls={`group-${rootID}`}
+                                          >
+                                              <ChevronRight
+                                                  size={16}
+                                                  className={`transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                                              />
+                                          </button>
+                                      ) : index > 0 ? (
+                                          <span className="w-4"></span> // Placeholder for alignment in child rows
+                                      ) : null}
+                                  </span>
+
+                                  {/* Add indentation for child items visually */}
+                                  {/* {index > 0 && <div className="w-5 flex-shrink-0"></div>} */}
+
+                                  <FileIcon size={20} className={`text-gray-400 mr-2 flex-shrink-0 ${index > 0 ? 'opacity-60 ml-4' : ''}`} />
+                                  <div className="min-w-0 flex-1"> {/* Allow shrinking/truncating */}
+                                      <div className={`text-sm font-medium flex items-center truncate ${index > 0 ? 'text-gray-600 opacity-60' : 'text-gray-900'}`}>
+                                          <span className="truncate">{file.name}</span>
+                                          {index === 0 && groupFiles.length > 1 && (
+                                              <span className="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full flex-shrink-0">
+                                                  Latest Version
+                                              </span>
+                                          )}
+                                      </div>
+                                      <div className={`text-sm text-gray-500 font-mono truncate ${index > 0 ? 'opacity-60' : ''}`}>
+                                          {file.ipfsLocation ? (
+                                              <>CID: {file.ipfsLocation.substring(0, 16)}...</>
+                                          ) : (
+                                              <>ID: {file.id.substring(0, 8)}...</>
+                                          )}
+                                      </div>
+                                  </div>
+                              </div>
+                          </td>
+                          <td className={`px-6 py-4 whitespace-nowrap text-sm text-gray-500 truncate ${index > 0 ? 'opacity-60' : ''}`}>{file.owner}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                              <div className={`text-sm text-gray-900 ${index > 0 ? 'opacity-60' : ''}`}>v{file.version}</div>
+                              {file.previousID && index > 0 && ( // Show update source only for older versions
+                                  <div className="text-xs text-gray-500">Updated from v{file.version - 1}</div>
+                              )}
+                          </td>
+                          <td className={`px-6 py-4 whitespace-nowrap text-sm text-gray-500 ${index > 0 ? 'opacity-60' : ''}`}>
+                              {new Date(file.timestamp).toLocaleString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                              <div className={`flex items-center space-x-2 ${index > 0 ? 'opacity-60' : ''}`}>
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${file.status === 'APPROVED'
+                                              ? 'bg-green-100 text-green-800'
+                                              : 'bg-yellow-100 text-yellow-800'
+                                      }`}>
+                                      {file.status}
+                                  </span>
+                                  {file.status === 'PENDING' && (
+                                      <span className="text-xs text-gray-500">
+                                          {file.currentApprovals.length}/{file.requiredOrgs.length} approvals
+                                      </span>
+                                  )}
+                              </div>
+                          </td>
+                          <td className={`px-6 py-4 whitespace-nowrap text-sm text-gray-500 relative ${index > 0 ? 'opacity-60' : ''}`}>
+                              <div className="relative inline-block text-left">
+                                  <button
+                                      className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                                      onClick={(e) => {
+                                          e.stopPropagation(); // Prevent triggering row clicks if any
+                                          setOpenDropdown(openDropdown === file.id ? null : file.id)
+                                      }}
+                                      aria-haspopup="true"
+                                      aria-expanded={openDropdown === file.id}
+                                  >
+                                      Actions
+                                      <ChevronDown size={16} className="ml-2" />
+                                  </button>
+
+                                  {openDropdown === file.id && renderDropdown(file, isPotentiallyBottom)}
+                              </div>
+                          </td>
+                      </tr>
+                  );
+              })}
+              {/* Render invisible content for accessibility if group is collapsed */}
+               {!isExpanded && groupFiles.length > 1 && (
+                   <div id={`group-${rootID}`} className="hidden">
+                       {/* You could put simplified content here if needed for screen readers */}
+                       Collapsed content for {groupFiles[0].name} - {groupFiles.length - 1} older versions.
+                   </div>
+               )}
+          </>
+      );
   };
-
-  // Sort file groups by the timestamp of the latest file in each group
-  const sortedFileGroups = Array.from(fileGroups.entries()).sort((a, b) => {
-    // Each group is already sorted by version (newest first)
-    // So we can just compare the timestamp of the first file in each group
-    const latestA = a[1][0];
-    const latestB = b[1][0];
-    
-    // Parse dates and sort in descending order (newest first)
-    return new Date(latestB.timestamp).getTime() - new Date(latestA.timestamp).getTime();
-  });
-
-  // Filter file groups based on status filter
-  const filteredFileGroups = sortedFileGroups.filter(([_, groupFiles]) => {
-    if (statusFilter === 'ALL') return true;
-    
-    // For each group, we check if the latest version matches the filter criteria
-    const latestFile = groupFiles[0];
-    return statusFilter === latestFile.status;
-  });
 
   return (
     <>
@@ -328,6 +393,6 @@ const FileTable = ({ files, onViewHistory, onApproveFile }: FileTableProps) => {
       )}
     </>
   );
-}
+});
 
 export default FileTable;

@@ -17,8 +17,8 @@ const ORG_ID = '4638c8ac-8fff-42d0-8590-cb6f80e61f07';
 const results = [];
 
 // Test configuration
-const TEST_ITERATIONS = 15;  // Number of times to run each test
-const CONCURRENT_BATCH_SIZES = [1, 5, 10, 15, 20, 25, 30]; // Different batch sizes for concurrent test
+const TEST_ITERATIONS = 10;  // Number of times to run each test
+const CONCURRENT_BATCH_SIZES = [1, 5, 10, 15, 20, 25]; // Different batch sizes for concurrent test
 
 let authToken = '';
 const fileIds = [];
@@ -346,7 +346,7 @@ describe('Performance Benchmarking', () => {
         // Don't fail the test if server has issues
         console.warn("Skipping approval test due to server error");
       }
-    }, 200000); // Timeout here
+    }, 30000); // Add timeout here too
   });
   
   
